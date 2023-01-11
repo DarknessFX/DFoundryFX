@@ -33,7 +33,7 @@ Visit <a href="https://github.com/DarknessFX/DFoundryFX_Example" target="_blank"
 
 ### Build from Source
 . Create a new folder.  ex: Plugins\DFoundryFX\ <br/>
-. Git clone this project with sub-modules.  ex: git clone --recurse-submodules https://github.com/DarknessFX/DFoundryFX.git<br/>
+. Git clone this project with sub-modules.  ex: git clone --recursive https://github.com/DarknessFX/DFoundryFX.git<br/>
 . Open your "Developer Command Prompt for VisualStudio" (Program Files\Microsoft Visual Studio\Common7\Tools\VsDevCmd.bat).<br/>
 . Execute Plugins\DFoundryFX\Source\ThirdParty\ImGui\Build.bat .<br/>
 . Copy Plugins\ folder to your project folder (or to your Engine\Plugins folder).<br/>
