@@ -51,9 +51,9 @@ Unreal Engine from Epic Games - https://www.unrealengine.com/ <br/>
 DearImGui from @ocornut - https://github.com/ocornut/imgui <br/>
 ImPlot from @epezent - https://github.com/epezent/implot <br/>
 MetalWorking Icon from TheNounProject - https://thenounproject.com/icon/metalworking-1563039/ <br/>
-ImGuiPlugin from @amuTBKT - https://github.com/amuTBKT/ImGuiPlugin
-UnrealEngine_ImGui from @sronsse - https://github.com/sronsse/UnrealEngine_ImGui
-Rama code multi threading from Rama - https://dev.epicgames.com/community/learning/tutorials/7Rz/rama-code-multi-threading-in-ue5-c
+ImGuiPlugin from @amuTBKT - https://github.com/amuTBKT/ImGuiPlugin <br/>
+UnrealEngine_ImGui from @sronsse - https://github.com/sronsse/UnrealEngine_ImGui <br/>
+Rama code multi threading from Rama - https://dev.epicgames.com/community/learning/tutorials/7Rz/rama-code-multi-threading-in-ue5-c <br/>
 
 ## License
 
