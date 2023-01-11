@@ -55,4 +55,4 @@ EXIT /b 2
 :END
 ECHO.
 ECHO %_fGreen%%_bBlack%Done!%_ResetColor%
-PAUSE
+ECHO.
