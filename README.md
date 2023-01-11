@@ -23,7 +23,7 @@ to the charts, controls and settings directly in your game viewport.<br/>
 
 ## About
 
-(WIP)
+(WIP) 
 
 ## Installation
 
