@@ -32,10 +32,10 @@ to the charts, controls and settings directly in your game viewport.<br/>
 Visit <a href="https://github.com/DarknessFX/DFoundryFX_Example" target="_blank">DFoundryFX_Example</a> repo , download Setup.bat and execute.<br/>
 
 ### Build from Source
-. Create a new folder.  ex: Plugins\DFoundryFX\ <br/>
-. Git clone this project with sub-modules.  ex: git clone --recursive https://github.com/DarknessFX/DFoundryFX.git<br/>
-. Open your "Developer Command Prompt for VisualStudio" (Program Files\Microsoft Visual Studio\Common7\Tools\VsDevCmd.bat).<br/>
-. Execute Plugins\DFoundryFX\Source\ThirdParty\ImGui\Build.bat .<br/>
+. Create a new folder.  ex: *Plugins\* <br/>
+. Git clone this project with sub-modules.  ex: *git clone --recursive https://github.com/DarknessFX/DFoundryFX.git*<br/>
+. Open your "**Developer Command Prompt for VisualStudio**" (*Program Files\Microsoft Visual Studio\Common7\Tools\VsDevCmd.bat*).<br/>
+. Execute *Plugins\DFoundryFX\Source\ThirdParty\ImGui\Build.bat* .<br/>
 . Copy Plugins\ folder to your project folder (or to your Engine\Plugins folder).<br/>
 . Open your project in VisualStudio and build.<br/>
 . Open your project, enabled DFoundryFX in Plugins tab. (restart UE if necessary)<br/>
