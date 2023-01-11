@@ -12,6 +12,11 @@ RMDIR /S /Q Binaries
 RMDIR /S /Q Intermediate
 
 ECHO.
+ECHO %_fGreen%%_bBlack%Copying Implot to ImGui.%_ResetColor%
+COPY /Y ImPlot\*.h ImGui\
+COPY /Y ImPlot\*.cpp ImGui\
+
+ECHO.
 ECHO %_fGreen%%_bBlack%CMake Intermediate\ImGui .%_ResetColor%
 cmake . -B Intermediate
 IF %ERRORLEVEL% NEQ 0 ( GOTO :ERROR )
