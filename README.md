@@ -14,7 +14,7 @@
 
 # DFoundryFX plugin For Unreal Engine
 
-<img src="https://raw.githubusercontent.com/DarknessFX/DFoundryFX/main/.git_img/screenshot01.png" width="640px" /> <br/>
+<img src="https://github.com/DarknessFX/DFoundryFX/raw/eea015c01c242c5107f6b47a4e32e807e9e6de8d/.git_img/screenshot01.png" width="640px" /> <br/>
 
 DFoundryFX feature customizable performance metric charts and STAT commands control panel
 for Unreal Engine GameViewports, including Shipping builds. This plugin don't need actors or
