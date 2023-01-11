@@ -1,0 +1,25 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.9",
+  "FriendlyName": "DFoundryFX",
+  "Description": "Game viewport tool with customizable performance charts and STAT control panel.",
+  "Category": "Performance",
+  "CreatedBy": "DarknessFX",
+  "CreatedByURL": "https://twitter.com/DrkFX",
+  "DocsURL": "https://github.com/DarknessFX/DFoundryFX/blob/main/README.md",
+  "SupportURL": "https://github.com/DarknessFX/DFoundryFX/issues",
+  "MarketplaceURL": "https://github.com/DarknessFX/DFoundryFX",
+  "CanContainContent": true,
+  "IsBetaVersion": true,
+  "IsExperimentalVersion": true,
+  "Installed": true,
+  "EnabledByDefault": false,
+  "Modules": [
+    {
+      "Name": "DFoundryFX",
+      "Type": "Runtime",
+      "LoadingPhase": "PostDefault"
+    }
+  ]
+}
