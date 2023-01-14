@@ -74,7 +74,7 @@ void FDFX_Thread::OnGameModeInitialized(AGameModeBase* aGameMode)
   if (hOnWorldBeginPlay.IsValid()) {
     hOnWorldBeginPlay.Reset();
     hOnViewportCreated.Reset();
-  
+
     if (GameViewport->OnWindowCloseRequested().GetHandle().IsValid())
     {
       GameViewport->OnWindowCloseRequested().Unbind();
@@ -83,6 +83,8 @@ void FDFX_Thread::OnGameModeInitialized(AGameModeBase* aGameMode)
 
   hOnWorldBeginPlay = uWorld->OnWorldBeginPlay.AddRaw(this, &FDFX_Thread::OnWorldBeginPlay);
   GameViewport->OnWindowCloseRequested().BindRaw(this, &FDFX_Thread::OnViewportClose);
+  hOnPipelineStateLogged = FPipelineFileCacheManager::OnPipelineStateLogged().AddRaw(this, &FDFX_Thread::OnPipelineStateLogged);
+  ShaderLogTime = FApp::GetCurrentTime();
 }
 
 
@@ -106,6 +108,13 @@ void FDFX_Thread::OnWorldBeginPlay()
     }
   }
 
+  GameViewport->GetWindow()->GetOnWindowClosedEvent().AddLambda(
+    [this](const TSharedRef<SWindow>& Window)
+    {
+      FDFX_Thread::OnViewportClose();
+    }
+  );
+
   hOnHUDPostRender = PlayerController->GetHUD()->OnHUDPostRender.AddRaw(this, &FDFX_Thread::OnHUDPostRender);
 }
 
@@ -122,6 +131,8 @@ void FDFX_Thread::OnViewportCreated()
 
 bool FDFX_Thread::OnViewportClose()
 {
+  ExternalWindow(true);
+
   GameViewport->OnWindowCloseRequested().Unbind();
   uWorld->OnWorldBeginPlay.Remove(hOnWorldBeginPlay);
   PlayerController->GetHUD()->OnHUDPostRender.Remove(hOnHUDPostRender);
@@ -133,6 +144,34 @@ bool FDFX_Thread::OnViewportClose()
   m_ImGuiDiffTime = 0;
   return true;
 }
+
+void FDFX_Thread::OnPipelineStateLogged(FPipelineCacheFileFormatPSO& PipelineCacheFileFormatPSO)
+{
+  FString AssetName = "";
+  double m_ShaderLogDiff = FApp::GetCurrentTime() - ShaderLogTime;
+  uint32 m_hash = PipelineCacheFileFormatPSO.Hash;
+  uint32 m_type = (int)PipelineCacheFileFormatPSO.Type;
+
+  switch(m_type) {
+    case 0:  //Compute
+      FDFX_StatData::AddShaderLog(1, 
+        *PipelineCacheFileFormatPSO.ComputeDesc.ComputeShader.ToString(), 
+        m_ShaderLogDiff);
+      break;
+    case 1:  //Graphics
+      FDFX_StatData::AddShaderLog(2,
+        *PipelineCacheFileFormatPSO.GraphicsDesc.ShadersToString(),
+        m_ShaderLogDiff);
+      break;
+    case 2:  //Raytracing
+      FDFX_StatData::AddShaderLog(4,
+        *PipelineCacheFileFormatPSO.RayTracingDesc.ShaderHash.ToString(),
+        m_ShaderLogDiff);
+      break;
+  }
+  ShaderLogTime = FApp::GetCurrentTime();
+}
+
 
 ImGuiIO& FDFX_Thread::GetImGuiIO() const
 {
@@ -196,7 +235,7 @@ void FDFX_Thread::ImGui_ImplUE_Render()
   const uint64 m_ImGuiBeginTime = FPlatformTime::Cycles64();
   ImGui_ImplUE_ProcessEvent();
   ImGui_ImplUE_NewFrame();
-  FDFX_StatData::LoadDFoundryFX(GameViewport, m_ImGuiDiffTime);
+  FDFX_StatData::RunDFoundryFX(GameViewport, m_ImGuiDiffTime);
   ImGui::Render();
   ImGui_ImplUE_RenderDrawLists();
   const uint64 m_ImGuiEndTime = FPlatformTime::Cycles64();
@@ -205,6 +244,9 @@ void FDFX_Thread::ImGui_ImplUE_Render()
 
 void FDFX_Thread::ImGui_ImplUE_ProcessEvent()
 {
+  if (!ControllerInput())
+    return;
+
   ImGuiIO& io = GetImGuiIO();
 
   io.KeyShift = PlayerController->IsInputKeyDown(EKeys::LeftShift) || PlayerController->IsInputKeyDown(EKeys::RightShift);
@@ -248,6 +290,9 @@ void FDFX_Thread::ImGui_ImplUE_ProcessEvent()
       }
     }
   }
+
+  ControllerInput();
+  ExternalWindow();
 }
 
 void FDFX_Thread::ImGui_ImplUE_NewFrame()
@@ -393,6 +438,84 @@ void FDFX_Thread::ImGui_ImplUE_SetClipboardText(void* user_data, const char* tex
   FGenericPlatformApplicationMisc::ClipboardCopy(new_str);
   delete[] new_str;
 }
+
+bool FDFX_Thread::ControllerInput()
+{
+  static bool bControllerDisabled = false;
+  static bool bMainWindowStillOpen = false;
+  APawn* aPawn = PlayerController->GetPawn();
+
+  if (!FDFX_StatData::bMainWindowOpen && !bMainWindowStillOpen)
+    return false;
+
+  if (!FDFX_StatData::bMainWindowOpen && bControllerDisabled) {
+    aPawn->EnableInput(PlayerController);
+    bControllerDisabled = false;
+    bMainWindowStillOpen = false;
+    return true;
+  }
+
+  if (FDFX_StatData::bMainWindowOpen && !FDFX_StatData::bDisableGameControls) {
+    aPawn->EnableInput(PlayerController);
+    bControllerDisabled = false;
+    return true;
+  }
+
+  if (FDFX_StatData::bDisableGameControls) {
+    if (FDFX_StatData::bMainWindowOpen) {
+      aPawn->DisableInput(PlayerController);
+      bMainWindowStillOpen = true;
+      bControllerDisabled = true;
+    }
+  }
+  return true;
+}
+
+void FDFX_Thread::ExternalWindow(bool IsExiting)
+{
+  static bool bExternalOpened = false;
+  static TSharedPtr<SWindow> m_ExternalWindow = nullptr;
+
+  if (IsExiting && m_ExternalWindow.IsValid()) {
+    m_ExternalWindow->RequestDestroyWindow();
+    return;
+  }
+
+  if (FDFX_StatData::bExternalWindow && !bExternalOpened && !m_ExternalWindow.IsValid()) {
+    m_ExternalWindow = SNew(SWindow)
+      .Title(LOCTEXT("DFoundryFX", "DFoundryFX"))
+      .ClientSize(FVector2D(ViewportSize.X / 4, ViewportSize.Y))
+      .AutoCenter(EAutoCenter::None)
+      .SupportsMaximize(true)
+      .SupportsMinimize(true)
+      .UseOSWindowBorder(false)
+      //.LayoutBorder(FMargin(0.f))
+      //.UserResizeBorder(FMargin(0.f))
+      .SizingRule(ESizingRule::UserSized);
+    m_ExternalWindow = FSlateApplication::Get().AddWindow(m_ExternalWindow.ToSharedRef(), true);
+
+    m_ExternalWindow->GetOnWindowClosedEvent().AddLambda(
+      [this](const TSharedRef<SWindow>& Window)
+      {
+        m_ExternalWindow = nullptr;
+      }
+    );
+    bExternalOpened = true;
+    return;
+  }
+
+  if (!FDFX_StatData::bExternalWindow && bExternalOpened && m_ExternalWindow.IsValid()) {
+    m_ExternalWindow->RequestDestroyWindow();
+    bExternalOpened = false;
+    return;
+  }
+
+  if (FDFX_StatData::bExternalWindow && bExternalOpened && !m_ExternalWindow.IsValid()) {
+    FDFX_StatData::bExternalWindow = false;
+    bExternalOpened = false;
+  }
+}
+
 
 // *******************
 // Whatever

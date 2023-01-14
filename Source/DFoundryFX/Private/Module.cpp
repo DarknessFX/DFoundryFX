@@ -7,14 +7,9 @@ void FDFX_Module::StartupModule()
 {
   UE_LOG(LogDFoundryFX, Log, TEXT("Module: Initializing DFoundryFX module."));
 
-  if (!FPlatformProcess::SupportsMultithreading()) {
-    UE_LOG(LogDFoundryFX, Warning, TEXT("Module: Platform don't support Multithreads."));
-  }
-
-  DFXThread = MakeShared<FDFX_Thread>();
-
-  // TODO: Output STAT HELP to FString instead of this STATList
-  //Load STAT Commands
+//FDFX_StatData 
+  // TODO: Output "STAT HELP to FString"(?) instead of this huge STATList
+  // Load STAT Commands
   FString STATList = "Accessibility,AI,AI_EQS,AIBehaviorTree,AICrowd,Anim,AnimationSharing,ARComponent,AsyncIO,AsyncLoad,AsyncLoadGameThread,Audio,AudioMixer,AudioThreadCommands,"
     "BackChannel,BeamParticles,CableComponent,CameraAnimation,Canvas,Chaos,ChaosCloth,ChaosCollision,ChaosCollisionCounters,ChaosConstraintDetails,ChaosCounters,"
     "ChaosDedicated,ChaosEngine,ChaosJoint,ChaosMinEvolution,ChaosNiagara,ChaosThread,ChaosUserDataPT,ChaosWide,Character,Collision,CollisionTags,"
@@ -36,11 +31,16 @@ void FDFX_Module::StartupModule()
   FDFX_StatData::LoadSTAT(FDFX_StatData::Common, "FPS,Unit,UnitGraph");
   FDFX_StatData::LoadSTAT(FDFX_StatData::Perf, "Engine,Game,GPU,RHI,InitViews,SceneRendering,Memory,MemoryPlatform,Shaders,ShaderCompiling,UI,Slate,Niagara,DrawCount,Tickables,TickGroups");
 
-/*
   // TODO: Output DumpConsoleCommands to FString
-  //Load CVAR
-  FDFX_StatData::LoadCVAR();
-*/
+  // Load CVAR
+  // FDFX_StatData::LoadCVAR();
+
+//FDFX_Thread
+  if (!FPlatformProcess::SupportsMultithreading()) {
+    UE_LOG(LogDFoundryFX, Warning, TEXT("Module: Platform don't support Multithreads."));
+  }
+
+  DFXThread = MakeShared<FDFX_Thread>();
 }
 
 

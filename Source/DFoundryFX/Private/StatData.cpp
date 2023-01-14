@@ -1,7 +1,7 @@
 #include "StatData.h"
 
 #define LOCTEXT_NAMESPACE "DFX_StatData"
-void FDFX_StatData::LoadDFoundryFX(UGameViewportClient* Viewport, uint64 ImGuiThread)
+void FDFX_StatData::RunDFoundryFX(UGameViewportClient* Viewport, uint64 ImGuiThread)
 {
   m_Viewport = Viewport;
   m_Viewport->GetViewportSize(ViewSize);
@@ -42,7 +42,7 @@ void FDFX_StatData::UpdateStats()
   m_GameThreadTime = 0.9 * m_GameThreadTime + 0.1 * FPlatformTime::ToMilliseconds(GGameThreadTime);
   m_RenderThreadTime = 0.9 * m_RenderThreadTime + 0.1 * FPlatformTime::ToMilliseconds(GRenderThreadTime);
   m_GPUFrameTime = 0.9 * m_GPUFrameTime + 0.1 * FPlatformTime::ToMilliseconds(GGPUFrameTime);
-  m_RHIThreadTime = 0.9 * m_RHIThreadTime + 0.1 * FPlatformTime::ToMilliseconds(GRHIThreadTime);
+  m_RHIThreadTime = 0.9 * m_RHIThreadTime + 0.1 * FPlatformTime::ToMilliseconds(GWorkingRHIThreadTime); // GRHIThreadTime display some crazy values on Shipping builds, changed to GWorkingRHIThreadTime.
   m_SwapBufferTime = 0.9 * m_SwapBufferTime + 0.1 * FPlatformTime::ToMilliseconds(GSwapBufferTime);
   m_InputLatencyTime = 0.9 * m_InputLatencyTime + 0.1 * FPlatformTime::ToMilliseconds(GInputLatencyTimer.DeltaTime);
 
@@ -369,6 +369,13 @@ void FDFX_StatData::MainWindow()
     const int Offset = 32;
     ImGui::SetWindowPos(ImVec2(ViewSize.X - ImGui::CalcTextSize(WindowTitle).x - Offset, 0));
     ImGui::SetWindowSize(ImVec2(ImGui::CalcTextSize(WindowTitle).x + Offset, 0));
+
+    if (ImGui::IsWindowHovered()) {
+      ImGui::GetIO().MouseDrawCursor = true;
+    }
+    else {
+      ImGui::GetIO().MouseDrawCursor = false;
+    }
   } else {
     bMainWindowOpen = true;
     ImGui::SetWindowPos(ImVec2(ViewSize.X - (ViewSize.X / 4), 0));
@@ -383,12 +390,10 @@ void FDFX_StatData::MainWindow()
       if (ImGui::BeginTabItem("Debug"))   Tab_Debug();
 
     ImGui::EndTabBar();
-  }
 
-  if (ImGui::IsWindowHovered())  {
-    ImGui::GetIO().MouseDrawCursor = true;
-  } else {
-    ImGui::GetIO().MouseDrawCursor = false;
+    if (ImGui::IsWindowHovered()) {
+      ImGui::GetIO().MouseDrawCursor = true;
+    }
   }
 
   ImGui::End();
@@ -400,41 +405,122 @@ void FDFX_StatData::Tab_Engine()
   IConsoleManager& m_ConMng = IConsoleManager::Get();
 
   if (ImGui::CollapsingHeader("Viewport Settings")) {
-    static int m_vwSize[2];
+    static int m_vwSize[2] = { static_cast<int>(ViewSize.X) , static_cast<int>(ViewSize.Y) };
     static int m_MaxFPS = m_ConMng.FindConsoleVariable(TEXT("t.MaxFPS"))->GetInt();
     static bool m_bVSync = m_ConMng.FindConsoleVariable(TEXT("r.VSync"))->GetBool();
+    static int m_ScrPct = m_ConMng.FindConsoleVariable(TEXT("r.ScreenPercentage"))->GetInt();
     static int m_ResQlt = m_ConMng.FindConsoleVariable(TEXT("sg.ResolutionQuality"))->GetInt();
-    m_vwSize[0] = static_cast<int>(ViewSize.X);
-    m_vwSize[1] = static_cast<int>(ViewSize.Y);
+    static int m_vwDist = m_ConMng.FindConsoleVariable(TEXT("r.ViewDistanceScale"))->GetInt();
+    static int m_PPQlt = m_ConMng.FindConsoleVariable(TEXT("sg.PostProcessQuality"))->GetInt();
+    static int m_ShdwQlt = m_ConMng.FindConsoleVariable(TEXT("sg.ShadowQuality"))->GetInt();
+    static int m_TexQlt = m_ConMng.FindConsoleVariable(TEXT("sg.TextureQuality"))->GetInt();
+    static int m_FXQlt = m_ConMng.FindConsoleVariable(TEXT("sg.EffectsQuality"))->GetInt();
+    static int m_DetMd = m_ConMng.FindConsoleVariable(TEXT("r.DetailMode"))->GetInt();
+    static int m_SKLOD = m_ConMng.FindConsoleVariable(TEXT("r.SkeletalMeshLODBias"))->GetInt();
+    static bool m_bFullscreen = m_Viewport->Viewport->IsFullscreen();
+    static bool m_bFullscreenExclusive = (m_ConMng.FindConsoleVariable(TEXT("r.FullscreenMode"))->GetInt() == 1? false : true);
 
     ImGui::BeginTable("##tblViewSettingsBase", 2, ImGuiTableFlags_SizingStretchProp);
     ImGui::TableNextColumn();
     ImGui::InputInt2("Size", m_vwSize); ImGui::SameLine();
     ImGui::TableNextColumn();
-    if (ImGui::Button("Apply##btnVS1"))
-      m_Viewport->ConsoleCommand(FString::Printf(TEXT("t.SetRes %ix%i"), m_vwSize[0], m_vwSize[1]));
+    if (ImGui::Button("Apply##btnVS1")) {
+      if (m_bFullscreen) {
+        m_Viewport->ConsoleCommand(FString::Printf(TEXT("r.SetRes %ix%if"), m_vwSize[0], m_vwSize[1]));
+      } else {
+        m_Viewport->ConsoleCommand(FString::Printf(TEXT("r.SetRes %ix%iw"), m_vwSize[0], m_vwSize[1]));
+      }
+    }
+
+    ImGui::TableNextColumn();
+    if (ImGui::Checkbox("Fullscreen", &m_bFullscreen)) {
+      if (m_bFullscreen != m_Viewport->Viewport->IsFullscreen()) {
+        if (m_bFullscreen) {
+          m_Viewport->ConsoleCommand(FString::Printf(TEXT("r.SetRes %ix%if"), m_vwSize[0], m_vwSize[1]));
+        } else {
+          m_Viewport->ConsoleCommand(FString::Printf(TEXT("r.SetRes %ix%iw"), m_vwSize[0], m_vwSize[1]));
+        }
+      }
+    }
+    ImGui::TableNextColumn();
+
+    ImGui::TableNextColumn();
+    if (ImGui::Checkbox("FullscreenExclusive", &m_bFullscreenExclusive)) {
+      if (m_bFullscreenExclusive != (m_ConMng.FindConsoleVariable(TEXT("r.FullscreenMode"))->GetInt() == 1 ? false : true)) {
+        if (m_bFullscreenExclusive) {
+          m_Viewport->ConsoleCommand(FString::Printf(TEXT("r.FullscreenMode 2")));
+          m_bFullscreenExclusive = true;
+        } else {
+          m_Viewport->ConsoleCommand(FString::Printf(TEXT("r.FullscreenMode 1")));
+          m_bFullscreenExclusive = false;
+        }
+      }
+    }
+    ImGui::TableNextColumn();
+
+    ImGui::TableNextColumn();
+    if (ImGui::Checkbox("VSync", &m_bVSync)) {
+      if (m_bVSync != m_ConMng.FindConsoleVariable(TEXT("r.VSync"))->GetBool()) {
+        if (m_bVSync) {
+          m_Viewport->ConsoleCommand("r.VSync 1");
+        } else {
+          m_Viewport->ConsoleCommand("r.VSync 0");
+        }
+      }
+    }
+    ImGui::TableNextColumn();
+
     ImGui::TableNextColumn();
     ImGui::InputInt("MaxFPS", &m_MaxFPS, 1, 5); ImGui::SameLine();
     ImGui::TableNextColumn();
     if (ImGui::Button("Apply##btnVS2"))
       m_Viewport->ConsoleCommand(FString::Printf(TEXT("t.MaxFPS %i"), m_MaxFPS));
     ImGui::TableNextColumn();
-    ImGui::InputInt("Res.Quality", &m_ResQlt, 1, 5); ImGui::SameLine();
+    ImGui::InputInt("ScreenPercent", &m_ScrPct, 1, 5); ImGui::SameLine();
     ImGui::TableNextColumn();
     if (ImGui::Button("Apply##btnVS3"))
+      m_Viewport->ConsoleCommand(FString::Printf(TEXT("r.ScreenPercentage %i"), m_ScrPct));
+    ImGui::TableNextColumn();
+    ImGui::InputInt("Res.Quality", &m_ResQlt, 1, 5); ImGui::SameLine();
+    ImGui::TableNextColumn();
+    if (ImGui::Button("Apply##btnVS4"))
       m_Viewport->ConsoleCommand(FString::Printf(TEXT("sg.ResolutionQuality %i"), m_ResQlt));
     ImGui::TableNextColumn();
-    if (ImGui::Checkbox("VSync", &m_bVSync)) {
-      if (m_bVSync != m_ConMng.FindConsoleVariable(TEXT("r.VSync"))->GetBool()) {
-        if (m_bVSync) {
-          m_Viewport->ConsoleCommand("r.VSync 1");
-        }
-        else {
-          m_Viewport->ConsoleCommand("r.VSync 0");
-        }
-      }
-    }
+    ImGui::InputInt("ViewDistance", &m_vwDist, 1, 5); ImGui::SameLine();
     ImGui::TableNextColumn();
+    if (ImGui::Button("Apply##btnVS5"))
+      m_Viewport->ConsoleCommand(FString::Printf(TEXT("r.ViewDistanceScale %i"), m_vwDist));
+    ImGui::TableNextColumn();
+    ImGui::InputInt("PP Quality", &m_PPQlt, 1, 5); ImGui::SameLine();
+    ImGui::TableNextColumn();
+    if (ImGui::Button("Apply##btnVS6"))
+      m_Viewport->ConsoleCommand(FString::Printf(TEXT("sg.PostProcessQuality %i"), m_PPQlt));
+    ImGui::TableNextColumn();
+    ImGui::InputInt("Shadow Qual.", &m_ShdwQlt, 1, 5); ImGui::SameLine();
+    ImGui::TableNextColumn();
+    if (ImGui::Button("Apply##btnVS7"))
+      m_Viewport->ConsoleCommand(FString::Printf(TEXT("sg.ShadowQuality %i"), m_ShdwQlt));
+    ImGui::TableNextColumn();
+    ImGui::InputInt("Texture Qual.", &m_TexQlt, 1, 5); ImGui::SameLine();
+    ImGui::TableNextColumn();
+    if (ImGui::Button("Apply##btnVS8"))
+      m_Viewport->ConsoleCommand(FString::Printf(TEXT("sg.TextureQuality %i"), m_TexQlt));
+    ImGui::TableNextColumn();
+    ImGui::InputInt("Effects Qual.", &m_FXQlt, 1, 5); ImGui::SameLine();
+    ImGui::TableNextColumn();
+    if (ImGui::Button("Apply##btnVS9"))
+      m_Viewport->ConsoleCommand(FString::Printf(TEXT("sg.EffectsQuality %i"), m_FXQlt));
+    ImGui::TableNextColumn();
+    ImGui::InputInt("Detail Mode", &m_DetMd, 1, 5); ImGui::SameLine();
+    ImGui::TableNextColumn();
+    if (ImGui::Button("Apply##btnVS10"))
+      m_Viewport->ConsoleCommand(FString::Printf(TEXT("r.DetailMode %i"), m_DetMd));
+    ImGui::TableNextColumn();
+    ImGui::InputInt("Skeletal LOD", &m_SKLOD, 1, 5); ImGui::SameLine();
+    ImGui::TableNextColumn();
+    if (ImGui::Button("Apply##btnVS11"))
+      m_Viewport->ConsoleCommand(FString::Printf(TEXT("r.SkeletalMeshLODBias %i"), m_SKLOD));
+
     ImGui::EndTable();
   }
 
@@ -719,33 +805,146 @@ void FDFX_StatData::Tab_Engine()
 
 void FDFX_StatData::Tab_Shaders()
 {
-  ImGui::Text("Shader Compiling Manager:");
-  ImGui::BeginDisabled();
-  ImGui::Indent();
+  static ImGuiTableFlags flags = ImGuiTableFlags_ScrollX | ImGuiTableFlags_ScrollY | 
+    ImGuiTableFlags_RowBg | ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersV | 
+    ImGuiTableFlags_Resizable | ImGuiTableFlags_Reorderable | ImGuiTableFlags_Hideable |
+    ImGuiTableFlags_SizingStretchProp;
+  ImVec2 outer_size = ImVec2(0.0f, ImGui::GetTextLineHeightWithSpacing() * 15);
+  float inner_width = ImGui::CalcTextSize("X").x * 80;
+  int ShaderTotal = 0;
+  double TimeTotal = 0;
+  if (ImGui::BeginTable("ShaderCompilerLog", 4, flags, outer_size, inner_width))
+  {
+    ImGui::TableSetupScrollFreeze(0, 1);
+    ImGui::TableSetupColumn("Type");
+    ImGui::TableSetupColumn("Hash");
+    ImGui::TableSetupColumn("Time (ms)");
+    ImGui::TableSetupColumn("Count");
+    ImGui::TableHeadersRow();
+    for (auto ShaderLog : ShaderCompilerLog)
+    {
+      if (ShaderLog.Count == 0) 
+        continue;
+
+      ImGui::TableNextColumn();
+      switch(ShaderLog.Type) {
+        case 1:
+          ImGui::Text("CS");
+          break;
+        case 2:
+          ImGui::Text("GS");
+          break;
+        case 4:
+          ImGui::Text("RT");
+          break;
+      }
+      ImGui::TableNextColumn(); ImGui::Text("%s", TCHAR_TO_ANSI(*ShaderLog.Hash.Left(40)));
+      ImGui::TableNextColumn(); ImGui::Text("%.5f", ShaderLog.Time);
+      ImGui::TableNextColumn(); ImGui::Text("%i", ShaderLog.Count);
+      TimeTotal += ShaderLog.Time;
+      ShaderTotal++;
+    }
+    ImGui::EndTable();
+    HelpMarker("CS = ComputeShader, GS = GraphicsShader, RT = RayTracing."); ImGui::SameLine();
+    ImGui::Text("Total Shaders : %i", ShaderTotal); ImGui::SameLine();
+    ImGui::Text(" | Time : %.5f", TimeTotal);
+  }
+
+
+  if (ImGui::CollapsingHeader("r.ShaderPipelineCache Context")) {
+    IConsoleManager& m_ConMng = IConsoleManager::Get();
+    static bool m_Enabled = m_ConMng.FindConsoleVariable(TEXT("r.ShaderPipelineCache.Enabled"))->GetBool();
+    static int32 m_BatchSize = m_ConMng.FindConsoleVariable(TEXT("r.ShaderPipelineCache.BatchSize"))->GetInt();
+    static int32 m_BackgroundBatchSize = m_ConMng.FindConsoleVariable(TEXT("r.ShaderPipelineCache.BackgroundBatchSize"))->GetBool();
+    static bool m_LogPSO = m_ConMng.FindConsoleVariable(TEXT("r.ShaderPipelineCache.LogPSO"))->GetBool();
+    static bool m_SaveAfterPSOsLogged = m_ConMng.FindConsoleVariable(TEXT("r.ShaderPipelineCache.SaveAfterPSOsLogged"))->GetBool();
+
+    ImGui::BeginDisabled();
+    InfoHelper("Enabled", m_Enabled);
+    InfoHelper("BatchSize", m_BatchSize);
+    InfoHelper("BackgroundBatchSize", m_BackgroundBatchSize);
+    InfoHelper("LogPSO", m_LogPSO);
+    InfoHelper("SaveAfterPSOsLogged", m_SaveAfterPSOsLogged);
+    ImGui::EndDisabled();
+  }
+
+  if (ImGui::CollapsingHeader("ShaderCodeLibrary Context")) {
+    ImGui::BeginDisabled();
+    InfoHelper("IsEnabled", FShaderCodeLibrary::IsEnabled());
+    InfoHelper("GetRuntimeShaderPlatform", (int32)FShaderCodeLibrary::GetRuntimeShaderPlatform());
+    InfoHelper("GetShaderCount", FShaderCodeLibrary::GetShaderCount());
+    ImGui::EndDisabled();
+  }
+
+  if (ImGui::CollapsingHeader("PipelineFileCacheManager Context")) {
+    ImGui::BeginDisabled();
+    InfoHelper("IsPipelineFileCacheEnabled", FPipelineFileCacheManager::IsPipelineFileCacheEnabled());
+    InfoHelper("NumPSOsLogged", FPipelineFileCacheManager::NumPSOsLogged());
+    InfoHelper("GetGameUsageMask", FPipelineFileCacheManager::GetGameUsageMask());
+    ImGui::EndDisabled();
+  }
+
+
+/*    
+    InfoHelper("GetGameVersionForPSOFileCache", FShaderPipelineCache::GetGameVersionForPSOFileCache());
+    InfoHelper("GetStatId", FShaderPipelineCache::GetStatId());
+    InfoHelper("IsBatchingPaused", FShaderPipelineCache::IsBatchingPaused());
+    InfoHelper("IsPrecompiling", FShaderPipelineCache::IsPrecompiling());
+    InfoHelper("IsTickable", FShaderPipelineCache::IsTickable());
+    InfoHelper("NeedsRenderingResumedForRenderingThreadTick", FShaderPipelineCache::NeedsRenderingResumedForRenderingThreadTick());
+    InfoHelper("NumPrecompilesRemaining", FShaderPipelineCache::NumPrecompilesRemaining());
+*/
+
+// OLD SHADER STATS
+/* CRASH WITHOUT A LOCK
+  if (ImGui::CollapsingHeader("Shader Compiler Stats")) {
+    ImGui::BeginTable("Shader Compiler Stats", 5);
+    ImGui::TableNextColumn(); ImGui::Text("Compiled");
+    ImGui::TableNextColumn(); ImGui::Text("CompiledDouble");
+    ImGui::TableNextColumn(); ImGui::Text("CompileTime");
+    ImGui::TableNextColumn(); ImGui::Text("Cooked");
+    ImGui::TableNextColumn(); ImGui::Text("CookedDouble");
+    for (auto a_sstat : GShaderCompilerStats->GetShaderCompilerStats()) {
+      for (auto sstat : a_sstat) {
+        ImGui::TableNextColumn(); ImGui::Text("%i", sstat.Value.Compiled);
+        ImGui::TableNextColumn(); ImGui::Text("%i", sstat.Value.CompiledDouble);
+        ImGui::TableNextColumn(); ImGui::Text("%f", sstat.Value.CompileTime);
+        ImGui::TableNextColumn(); ImGui::Text("%i", sstat.Value.Cooked);
+        ImGui::TableNextColumn(); ImGui::Text("%i", sstat.Value.CookedDouble);
+        //ImGui::TableNextColumn(); ImGui::Text("%i", sstat.Value.PermutationCompilations);
+      }
+    }
+    ImGui::EndTable();
+    InfoHelper("TotalShadersCompiled", GShaderCompilerStats->GetTotalShadersCompiled());
+    // Cause a FatalCrash because it uses a lock
+    //InfoHelper("TimeShaderCompilationWasActive", GShaderCompilerStats->GetTimeShaderCompilationWasActive());
+  }
+*/
+
+/* Fatal Crash
+  if (ImGui::CollapsingHeader("Shader Compiling Manager")) {
+    ImGui::BeginDisabled();
+    ImGui::Indent();
     InfoHelper("AllowShaderCompiling", AllowShaderCompiling());
     InfoHelper("AllowGlobalShaderLoad", AllowGlobalShaderLoad());
-    InfoHelper("AllowAsynchronousShaderCompiling", GShaderCompilingManager->AllowAsynchronousShaderCompiling());
-    InfoHelper("AreWarningsSuppressed", GShaderCompilingManager->AreWarningsSuppressed(EShaderPlatform::SP_PCD3D_SM6));
-    InfoHelper("GetNumLocalWorkers", GShaderCompilingManager->GetNumLocalWorkers());
-    InfoHelper("GetNumOutstandingJobs", GShaderCompilingManager->GetNumOutstandingJobs());
+    //InfoHelper("AllowAsynchronousShaderCompiling", GShaderCompilingManager->AllowAsynchronousShaderCompiling());
+    //InfoHelper("AreWarningsSuppressed", GShaderCompilingManager->AreWarningsSuppressed(EShaderPlatform::SP_PCD3D_SM6));
+    //InfoHelper("GetNumLocalWorkers", GShaderCompilingManager->GetNumLocalWorkers());
+    //InfoHelper("GetNumPendingJobs", GShaderCompilingManager->GetNumPendingJobs());
+    //InfoHelper("GetNumOutstandingJobs", GShaderCompilingManager->GetNumOutstandingJobs());
+    //InfoHelper("GetNumRemainingJobs", GShaderCompilingManager->GetNumRemainingJobs());
     InfoHelper("GetStaticAssetTypeName", GShaderCompilingManager->GetStaticAssetTypeName().ToString());
     InfoHelper("HasShaderJobs", GShaderCompilingManager->HasShaderJobs());
     InfoHelper("IgnoreAllThrottling", GShaderCompilingManager->IgnoreAllThrottling());
     InfoHelper("IsCompiling", GShaderCompilingManager->IsCompiling());
     InfoHelper("IsShaderCompilationSkipped", GShaderCompilingManager->IsShaderCompilationSkipped());
     InfoHelper("ShouldDisplayCompilingNotification", GShaderCompilingManager->ShouldDisplayCompilingNotification());
-  
-    /*
-    tmpiChk = IAssetCompilingManager::GetNumRemainingAssets();
-    ImGui::Text("NumRemainingAssets - %d", &tmpiChk);
-    tmpfnChk = IAssetCompilingManager::GetAssetTypeName();
-    ImGui::Text("AssetTypeName - %s", TCHAR_TO_ANSI(*tmpfnChk.ToString());
-    tmptfChk = IAssetCompilingManager::GetAssetNameFormat();
-    ImGui::Text("AssetNameFormat - %s", TCHAR_TO_ANSI(*tmptfChk.GetSourceString());
+    InfoHelper("GetAbsoluteShaderDebugInfoDirectory\n", GShaderCompilingManager->GetAbsoluteShaderDebugInfoDirectory());
+    ImGui::Unindent();
+    ImGui::EndDisabled();
+  }
 */
-  ImGui::Unindent();
-  ImGui::EndDisabled();
-  ImGui::EndTabItem();
+    ImGui::EndTabItem();
 }
 
 void FDFX_StatData::Tab_STAT()
@@ -834,9 +1033,6 @@ void FDFX_StatData::Tab_Settings()
   if (pwThread.History > StatHistoryGlobal) pwThread.History = StatHistoryGlobal;
   if (pwFrame.History > StatHistoryGlobal) pwFrame.History = StatHistoryGlobal;
   if (pwFPS.History > StatHistoryGlobal) pwFPS.History = StatHistoryGlobal;
-
-  //TODO
-  //ImGui::Checkbox("Disable in-game controls", &bDisableGameControls);
 
   if (ImGui::CollapsingHeader("Graphs")) {
     ImGui::Checkbox("Display Graphs", &bShowPlots);
@@ -937,6 +1133,8 @@ void FDFX_StatData::Tab_Settings()
   }
 
   if (ImGui::CollapsingHeader("Advanced")) {
+    ImGui::Checkbox("Use external window", &bExternalWindow);
+    ImGui::Checkbox("Disable in-game controls", &bDisableGameControls);
     ImGui::Checkbox("Show Debug Tab", &bShowDebugTab);
     if (ImGui::Button("Reset DFoundryFX")) {
       ImGui::ClearIniSettings();
@@ -995,10 +1193,6 @@ void FDFX_StatData::Tab_Debug()
     ImGui::Text("Last Time: %f", m_LastTime);
     ImGui::Text("Delta Time: %f", m_DiffTime);
     ImGui::Text("FPS float: %f", 1000 / m_DiffTime);
-
-    ImGui::NewLine();
-    ImGui::Text("RHI :  %4.3f", m_Viewport->GetStatUnitData()->RHITTime);
-    ImGui::Text("RHIRaw :  %4.3f", m_Viewport->GetStatUnitData()->RawRHITTime);
 
   ImGui::EndTabItem();
 }
@@ -1185,6 +1379,29 @@ void FDFX_StatData::LoadDemos()
 
   ImGui::ShowDemoWindow();
   ImPlot::ShowDemoWindow();
+}
+
+void FDFX_StatData::AddShaderLog(int Type, FString Hash, double Time)
+{
+  bool bShaderLogExist = false;
+  for (auto& ShaderLog : ShaderCompilerLog)
+  {
+    if (ShaderLog.Hash.Left(40) == Hash.Left(40)) {
+      ShaderLog.Type = ShaderLog.Type | Type;
+      ShaderLog.Time = ShaderLog.Time + Time;
+      ShaderLog.Count = ShaderLog.Count + 1;
+      bShaderLogExist = true;
+      break;
+    }
+  }
+  if (!bShaderLogExist) {
+    FShaderCompilerLog NewItem;
+    NewItem.Type = Type;
+    NewItem.Hash = Hash;
+    NewItem.Time = Time;
+    NewItem.Count = 1;
+    ShaderCompilerLog.Add(NewItem);
+  }
 }
 
 void FDFX_StatData::ToggleButton(const char* str_id, bool* v)
