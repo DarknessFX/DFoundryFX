@@ -9,8 +9,8 @@
 #include "RHI.h"
 #include "Stats/Stats2.h"
 #include "Stats/StatsData.h"
-#include "ShaderCompiler.h"
-#include "AssetCompilingManager.h"
+#include "ShaderCodeLibrary.h"
+#include "ShaderPipelineCache.h"
 #include "HAL/ConsoleManager.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -19,7 +19,7 @@
 class DFOUNDRYFX_API FDFX_StatData
 {
 public:
-  static void LoadDFoundryFX(UGameViewportClient* Viewport, uint64 ImGuiThreadTime);
+  static void RunDFoundryFX(UGameViewportClient* Viewport, uint64 ImGuiThreadTime);
 
   enum EStatHeader : int {
     All = 0,
@@ -38,7 +38,11 @@ public:
   static void LoadSTAT(FDFX_StatData::EStatHeader InHeader, FString InList);
   static void LoadCVAR();
 
-  static inline bool bMainWindowOpen;
+  static inline bool bMainWindowOpen = false;
+  static inline bool bExternalWindow = false;
+  static inline bool bDisableGameControls = true;
+
+  static void AddShaderLog(int Type, FString Hash, double Time);
 
 private:
   static inline bool bIsDefaultLoaded = false;
@@ -195,4 +199,11 @@ private:
 
   static inline void DrawSTAT(FDFX_StatData::EStatHeader InHeader, FString InFilter = "");
 
+  struct FShaderCompilerLog {
+    int Type;
+    int Count;
+    double Time;
+    FString Hash;
+  };
+  static inline TArray<FShaderCompilerLog> ShaderCompilerLog;
 };

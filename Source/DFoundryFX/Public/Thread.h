@@ -14,7 +14,10 @@
 #include "Engine/GameViewportDelegates.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/HUD.h"
-#include "Engine/GameInstance.h"
+#include "ShaderPipelineCache.h"
+#include "ShaderCodeArchive.h"
+#include "Framework/Application/SlateApplication.h"
+#include "Widgets/SWindow.h"
 
 // ImGui
 #include "Engine/Engine.h"
@@ -82,6 +85,10 @@ public:  // Events -> GameMode and Viewport
   FDelegateHandle hOnViewportClose;
   bool OnViewportClose();
 
+  FDelegateHandle hOnPipelineStateLogged;
+  void OnPipelineStateLogged(FPipelineCacheFileFormatPSO& PipelineCacheFileFormatPSO);
+
+  static inline double ShaderLogTime = 0;
 
 public:  // ImGui
   bool ImGui_ImplUE_Init();
@@ -107,4 +114,8 @@ private:
   static inline uint64 m_ImGuiDiffTime;
 
   static ImGuiKey FKeyToImGuiKey(FName Keyname);
+
+  bool ControllerInput();
+  void ExternalWindow(bool IsExiting = false);
+
 };
