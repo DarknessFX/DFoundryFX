@@ -31,6 +31,8 @@ public class DFoundryFX : ModuleRules
         "InputCore",
         "ApplicationCore",
         "RHI",
+        "Slate",
+        "SlateCore",
       }
 		);
 		
