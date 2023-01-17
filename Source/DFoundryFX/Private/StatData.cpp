@@ -1280,7 +1280,7 @@ void FDFX_StatData::LoadDefaultValues(FVector2D InViewportSize)
   bShowPlots = true;
   bPlotsSort = false;
   bShowDebugTab = true;
-  //bDisableGameControls = false;
+  bDisableGameControls = false;
   StatHistoryGlobal = 10;
 
   ImPlotFrameCount = 0;
