@@ -16,8 +16,9 @@
 #include "GameFramework/HUD.h"
 #include "ShaderPipelineCache.h"
 #include "ShaderCodeArchive.h"
-#include "Framework/Application/SlateApplication.h"
-#include "Widgets/SWindow.h"
+// External window
+//#include "Framework/Application/SlateApplication.h"
+//#include "Widgets/SWindow.h"
 
 // ImGui
 #include "Engine/Engine.h"
@@ -27,7 +28,6 @@
 #include "Materials/MaterialInstance.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
-#include "CanvasTypes.h"
 #include "imgui.h"
 
 // Stats
@@ -87,8 +87,7 @@ public:  // Events -> GameMode and Viewport
 
   FDelegateHandle hOnPipelineStateLogged;
   void OnPipelineStateLogged(FPipelineCacheFileFormatPSO& PipelineCacheFileFormatPSO);
-
-  static inline double ShaderLogTime = 0;
+  double ShaderLogTime = 0;
 
 public:  // ImGui
   bool ImGui_ImplUE_Init();
@@ -111,11 +110,14 @@ private:
   ImGuiContext* m_ImGuiContext = nullptr;
   ImPlotContext* m_ImPlotContext = nullptr;
 
-  static inline uint64 m_ImGuiDiffTime;
+  uint64 m_ImGuiDiffTime;
 
   static ImGuiKey FKeyToImGuiKey(FName Keyname);
 
   bool ControllerInput();
   void ExternalWindow(bool IsExiting = false);
+
+  TSharedPtr<SWindow> m_extWindow = nullptr;
+  bool bExternalOpened = false;
 
 };
