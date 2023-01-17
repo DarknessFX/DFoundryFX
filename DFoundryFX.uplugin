@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
   "Version": 1,
-  "VersionName": "0.93",
+  "VersionName": "0.95",
   "FriendlyName": "DFoundryFX",
   "Description": "Game viewport tool with customizable performance charts and STAT control panel.",
   "Category": "Performance",
