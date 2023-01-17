@@ -1133,7 +1133,7 @@ void FDFX_StatData::Tab_Settings()
   }
 
   if (ImGui::CollapsingHeader("Advanced")) {
-    ImGui::Checkbox("Use external window", &bExternalWindow);
+    //ImGui::Checkbox("Use external window", &bExternalWindow);
     ImGui::Checkbox("Disable in-game controls", &bDisableGameControls);
     ImGui::Checkbox("Show Debug Tab", &bShowDebugTab);
     if (ImGui::Button("Reset DFoundryFX")) {

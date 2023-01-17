@@ -91,6 +91,7 @@ void FDFX_Thread::OnGameModeInitialized(AGameModeBase* aGameMode)
 void FDFX_Thread::OnWorldBeginPlay()
 {
   ViewportSize = FVector2D::ZeroVector;
+  bExternalOpened = false;
 
   // Fix for GameMode HUD Class = None
   PlayerController = uWorld->GetFirstPlayerController();
@@ -292,7 +293,7 @@ void FDFX_Thread::ImGui_ImplUE_ProcessEvent()
   }
 
   ControllerInput();
-  ExternalWindow();
+  //ExternalWindow();
 }
 
 void FDFX_Thread::ImGui_ImplUE_NewFrame()
@@ -306,6 +307,9 @@ void FDFX_Thread::ImGui_ImplUE_NewFrame()
   io.MouseDown[0] = PlayerController->IsInputKeyDown(EKeys::LeftMouseButton);
   io.MouseDown[1] = PlayerController->IsInputKeyDown(EKeys::RightMouseButton);
   io.MouseDown[2] = PlayerController->IsInputKeyDown(EKeys::MiddleMouseButton);
+
+  //TODO : Add MouseWheelAxis
+  //io.AddMouseWheelEvent(0.f, PlayerController->IsInputKeyDown(EKeys::MouseWheelAxis));
 
   ImGui::NewFrame();
 }
@@ -473,44 +477,53 @@ bool FDFX_Thread::ControllerInput()
 
 void FDFX_Thread::ExternalWindow(bool IsExiting)
 {
-  static bool bExternalOpened = false;
-  static TSharedPtr<SWindow> m_ExternalWindow = nullptr;
+// TODO: Open external window and move charts.
+// FAILED: To create an UCanvas on external window
 
-  if (IsExiting && m_ExternalWindow.IsValid()) {
-    m_ExternalWindow->RequestDestroyWindow();
+  if (!FDFX_StatData::bExternalWindow && !bExternalOpened)
+    return;
+
+  bool extWinValid = m_extWindow.IsValid();
+
+  if (IsExiting && extWinValid) {
+    m_extWindow->RequestDestroyWindow();
     return;
   }
 
-  if (FDFX_StatData::bExternalWindow && !bExternalOpened && !m_ExternalWindow.IsValid()) {
-    m_ExternalWindow = SNew(SWindow)
-      .Title(LOCTEXT("DFoundryFX", "DFoundryFX"))
+  if (FDFX_StatData::bExternalWindow && !bExternalOpened && !extWinValid) {
+    FVector2D winPos = FVector2D(GameViewport->GetWindow()->GetPositionInScreen().X + ViewportSize.X, GameViewport->GetWindow()->GetPositionInScreen().Y);
+    m_extWindow = SNew(SWindow)
+      .Title(FText::FromString("DFoundryFX"))
+      .Type(EWindowType::GameWindow)
       .ClientSize(FVector2D(ViewportSize.X / 4, ViewportSize.Y))
-      .AutoCenter(EAutoCenter::None)
+      .ScreenPosition(winPos)
+      .FocusWhenFirstShown(true)
       .SupportsMaximize(true)
       .SupportsMinimize(true)
       .UseOSWindowBorder(false)
-      //.LayoutBorder(FMargin(0.f))
-      //.UserResizeBorder(FMargin(0.f))
       .SizingRule(ESizingRule::UserSized);
-    m_ExternalWindow = FSlateApplication::Get().AddWindow(m_ExternalWindow.ToSharedRef(), true);
-
-    m_ExternalWindow->GetOnWindowClosedEvent().AddLambda(
-      [this](const TSharedRef<SWindow>& Window)
-      {
-        m_ExternalWindow = nullptr;
+    m_extWindow->SetAllowFastUpdate(true);
+    m_extWindow->GetOnWindowClosedEvent().AddLambda(
+      [this](const TSharedRef<SWindow>& Window) {
+        m_extWindow = nullptr;
       }
     );
+    m_extWindow = FSlateApplication::Get().AddWindow(m_extWindow.ToSharedRef(), true);
+    m_extWindow->ShowWindow();
+    m_extWindow->MoveWindowTo(winPos);
+    FSlateApplication::Get().Tick();
+    
     bExternalOpened = true;
     return;
   }
 
-  if (!FDFX_StatData::bExternalWindow && bExternalOpened && m_ExternalWindow.IsValid()) {
-    m_ExternalWindow->RequestDestroyWindow();
+  if (!FDFX_StatData::bExternalWindow && bExternalOpened && extWinValid) {
+    m_extWindow->RequestDestroyWindow();
     bExternalOpened = false;
     return;
   }
 
-  if (FDFX_StatData::bExternalWindow && bExternalOpened && !m_ExternalWindow.IsValid()) {
+  if (FDFX_StatData::bExternalWindow && bExternalOpened && !extWinValid) {
     FDFX_StatData::bExternalWindow = false;
     bExternalOpened = false;
   }
