@@ -16,9 +16,7 @@
 
 <img src="https://github.com/DarknessFX/DFoundryFX/raw/eea015c01c242c5107f6b47a4e32e807e9e6de8d/.git_img/screenshot01.png" width="640px" /> <br/>
 
-Plugin with .
-
-DFoundryFX feature customizable performance metric charts (including Shipping builds), 
+DFoundryFX plugin feature customizable performance metric charts (including Shipping builds), 
 Shader compiler monitoring and STAT commands control panel for Unreal Engine GameViewports. 
 While the plugin is enabled you always have access to the charts, controls and settings 
 directly in your game viewport, this plugin don't need actors or objects to be created 
