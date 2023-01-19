@@ -31,7 +31,7 @@ in your project.<br/>
 ### Use precompiled plugin
 
 . Download the latest <a href="https://github.com/DarknessFX/DFoundryFX/releases" target="_blank">release</a>. <br/>
-. Unzip the file in your UEFolder\Plugins. <br/>
+. Unzip the file in your UEFolder\Engine\Plugins. <br/>
 . Start Unreal Engine. <br/>
 . Menu Tools > Plugins. <br/>
 . Enable in Installed > Perfomance > DFoundryFX . <br/>
