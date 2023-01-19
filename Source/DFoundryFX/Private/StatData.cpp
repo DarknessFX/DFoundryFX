@@ -366,9 +366,16 @@ void FDFX_StatData::MainWindow()
 
   if (ImGui::IsWindowCollapsed())  {
     bMainWindowOpen = false;
-    const int Offset = 32;
+    const int Offset = 64;
     ImGui::SetWindowPos(ImVec2(ViewSize.X - ImGui::CalcTextSize(WindowTitle).x - Offset, 0));
     ImGui::SetWindowSize(ImVec2(ImGui::CalcTextSize(WindowTitle).x + Offset, 0));
+
+    const ImRect titleBarRect = ImGui::GetCurrentWindow()->TitleBarRect();
+    ImGui::PushClipRect(titleBarRect.Min, titleBarRect.Max, false);
+    ImGui::SetCursorPos(ImVec2(ImGui::CalcTextSize(WindowTitle).x + Offset / 2, 0.0f));
+    ImGui::Text(" "); ImGui::SameLine();
+    ImGui::Checkbox("##DisplayGraphs", &bShowPlots);
+    ImGui::PopClipRect();
 
     if (ImGui::IsWindowHovered()) {
       ImGui::GetIO().MouseDrawCursor = true;
@@ -1203,6 +1210,16 @@ void FDFX_StatData::LoadDefaultValues(FVector2D InViewportSize)
   static FVector2D oldViewSize;
   if (bIsDefaultLoaded) {
     if (oldViewSize == InViewportSize) {
+      const double winSize = InViewportSize.X - InViewportSize.X / 4;
+      if (bMainWindowOpen) {
+        if (pwFPS.Size.x == InViewportSize.X) {
+          pwFPS.Size.x = winSize;
+        }
+      } else {
+        if (pwFPS.Size.x == winSize) {
+          pwFPS.Size.x = InViewportSize.X;
+        }
+      }
       return;
     } else {
       pwThread.Position = ImVec2(InViewportSize.X * (pwThread.Position.x / oldViewSize.X), InViewportSize.Y * (pwThread.Position.y / oldViewSize.Y));
