@@ -28,7 +28,7 @@ in your project.<br/>
 
 ## Installation
 
-### Use precompiled plugin
+### Use precompiled plugin (Unreal Engine 5.1 only)
 
 . Download the latest <a href="https://github.com/DarknessFX/DFoundryFX/releases" target="_blank">release</a>. <br/>
 . Unzip the file in your UEFolder\Engine\Plugins. <br/>
