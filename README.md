@@ -53,6 +53,10 @@ in your project.<br/>
 . Open your project, enabled DFoundryFX in Plugins tab (Installed > Perfomance > DFoundryFX). <br/>
 . Play your project, DFoundryFX window and charts will show up.<br/>
 
+## Compatibility with Unreal Engine 5.0
+
+(WIP)
+
 ## Credits
 
 Unreal Engine from Epic Games - https://www.unrealengine.com/ <br/>
