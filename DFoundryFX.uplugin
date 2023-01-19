@@ -1,9 +1,9 @@
 {
   "FileVersion": 3,
   "Version": 1,
-  "VersionName": "0.95",
+  "VersionName": "0.96",
   "FriendlyName": "DFoundryFX",
-  "Description": "Game viewport tool with customizable performance charts and STAT control panel.",
+  "Description": "Customizable performance metric charts (including Shipping builds), Shader compiler monitor and STAT commands control panel.",
   "Category": "Performance",
   "CreatedBy": "DarknessFX",
   "CreatedByURL": "https://twitter.com/DrkFX",
