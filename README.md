@@ -36,11 +36,12 @@ in your project.<br/>
 . Menu Tools > Plugins. <br/>
 . Enable in Installed > Perfomance > DFoundryFX . <br/>
 . Restart Unreal Engine. <br/>
-. Start play, enjoy. <br/>
+. Play your project, DFoundryFX window and charts will show up.<br/>
 
 ### Build from Example
 
 . Visit <a href="https://github.com/DarknessFX/DFoundryFX_Example" target="_blank">DFoundryFX_Example</a> repo , download Setup.bat and execute.<br/>
+. Play your project, DFoundryFX window and charts will show up.<br/>
 
 ### Build from Source
 . Create a new folder.  ex: *Plugins\* <br/>
@@ -49,7 +50,7 @@ in your project.<br/>
 . Execute *Plugins\DFoundryFX\Source\ThirdParty\ImGui\Build.bat* .<br/>
 . Copy Plugins\ folder to your project folder (or to your Engine\Plugins folder).<br/>
 . Open your project in VisualStudio and build.<br/>
-. Open your project, enabled DFoundryFX in Plugins tab. (restart UE if necessary)<br/>
+. Open your project, enabled DFoundryFX in Plugins tab (Installed > Perfomance > DFoundryFX). <br/>
 . Play your project, DFoundryFX window and charts will show up.<br/>
 
 ## Credits
