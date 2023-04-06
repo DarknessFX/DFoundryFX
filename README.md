@@ -34,7 +34,7 @@ in your project.<br/>
 . Unzip the file in your UEFolder\Engine\Plugins. <br/>
 . Start Unreal Engine. <br/>
 . Menu Tools > Plugins. <br/>
-. Enable in Installed > Perfomance > DFoundryFX . <br/>
+. Enable in Installed > Performance > DFoundryFX . <br/>
 . Restart Unreal Engine. <br/>
 . Play your project, DFoundryFX window and charts will show up.<br/>
 
