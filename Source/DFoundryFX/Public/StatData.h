@@ -12,9 +12,9 @@
 #include "ShaderCodeLibrary.h"
 #include "ShaderPipelineCache.h"
 #include "HAL/ConsoleManager.h"
-#include "imgui.h"
-#include "imgui_internal.h"
-#include "implot.h"
+#include "ImGui/imgui.h"
+#include "ImGui/imgui_internal.h"
+#include "ImGui/implot.h"
 
 class DFOUNDRYFX_API FDFX_StatData
 {
@@ -67,6 +67,7 @@ private:
   static inline const int StatHistoryMax = 10;
   static inline float StatHistoryGlobal = 3.0f; // seconds
   struct FPlotWindow {
+    FPlotWindow() {} // D11.DH: Clang bug https://github.com/llvm/llvm-project/issues/36032
     bool bShowPlot = true;
     float History = 3.0f;
     ImVec2 Range = ImVec2(0, 0);
@@ -140,17 +141,17 @@ private:
   static inline float  m_ImGuiThreadTime;
 
   static inline double ImPlotFrameCount;
-  static inline FHistoryBuffer HistoryTime;
-  static inline FHistoryBuffer FrameCount;
-  static inline FHistoryBuffer FrameTime;
-  static inline FHistoryBuffer FramesPerSecond;
-  static inline FHistoryBuffer GameThreadTime;
-  static inline FHistoryBuffer RenderThreadTime;
-  static inline FHistoryBuffer GPUFrameTime;
-  static inline FHistoryBuffer RHIThreadTime;
-  static inline FHistoryBuffer SwapBufferTime;
-  static inline FHistoryBuffer InputLatencyTime;
-  static inline FHistoryBuffer ImGuiThreadTime;
+  static inline FHistoryBuffer HistoryTime {HistoryMaxSize};
+  static inline FHistoryBuffer FrameCount {HistoryMaxSize};
+  static inline FHistoryBuffer FrameTime {HistoryMaxSize};
+  static inline FHistoryBuffer FramesPerSecond {HistoryMaxSize};
+  static inline FHistoryBuffer GameThreadTime {HistoryMaxSize};
+  static inline FHistoryBuffer RenderThreadTime {HistoryMaxSize};
+  static inline FHistoryBuffer GPUFrameTime {HistoryMaxSize};
+  static inline FHistoryBuffer RHIThreadTime {HistoryMaxSize};
+  static inline FHistoryBuffer SwapBufferTime {HistoryMaxSize};
+  static inline FHistoryBuffer InputLatencyTime {HistoryMaxSize};
+  static inline FHistoryBuffer ImGuiThreadTime {HistoryMaxSize};
 
   static inline ImGuiWindowFlags window_flags = ImGuiWindowFlags_NoTitleBar |
     ImGuiWindowFlags_NoBringToFrontOnFocus |

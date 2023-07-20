@@ -9,9 +9,9 @@ public class DFoundryFX : ModuleRules
 
     PublicIncludePaths.AddRange(
 			new string[] {
-        Path.Combine(ModuleDirectory, "Public"),
-        Path.Combine(PluginDirectory, "Source/Thirdparty/ImGui/imgui"),
-        Path.Combine(PluginDirectory, "Source/Thirdparty/ImGui/implot"),
+        Path.Combine(ModuleDirectory, "Public")//,
+        //Path.Combine(PluginDirectory, "Source/Thirdparty/ImGui/imgui"),
+        //Path.Combine(PluginDirectory, "Source/Thirdparty/ImGui/implot"),
       }
 		);
 
@@ -53,18 +53,18 @@ public class DFoundryFX : ModuleRules
       }
     );
 
-    if (Target.Configuration == UnrealTargetConfiguration.Shipping || Target.Configuration == UnrealTargetConfiguration.Test)
-    {
-      PublicAdditionalLibraries.Add(
-        Path.Combine(PluginDirectory, "Binaries/Win64/ImGui.lib")
-      );
-    }
-    else
-    {
-      PublicAdditionalLibraries.Add(
-        Path.Combine(PluginDirectory, "Binaries/Win64/ImGui_Debug.lib")
-      );
-    }
+    //if (Target.Configuration == UnrealTargetConfiguration.Shipping || Target.Configuration == UnrealTargetConfiguration.Test)
+    //{
+    //        PublicAdditionalLibraries.Add(
+    //          Path.Combine(PluginDirectory, "Binaries/Win64/ImGui.lib")
+    //        );
+    //    }
+    //else
+    //{
+    //        PublicAdditionalLibraries.Add(
+    //          Path.Combine(PluginDirectory, "Binaries/Win64/ImGui_Debug.lib")
+    //        );
+    //    }
 
     // EXTRA STUFF
     PublicDefinitions.Add("WITH_IMGUI=1");

@@ -1,5 +1,4 @@
 #include "Module.h"
-
 DEFINE_LOG_CATEGORY(LogDFoundryFX);
 
 #define LOCTEXT_NAMESPACE "DFX_Module"
