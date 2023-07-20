@@ -1,6 +1,11 @@
 #include "Thread.h"
-
+#include "Module.h"
 #define LOCTEXT_NAMESPACE "DFX_Thread"
+static bool GFoundryFXEnabled = false;
+static FAutoConsoleCommand DFoundryFXEnabled(TEXT("DFoundryFX.ToggleEnabled"), TEXT("Toggle whether to show the DFoundryFX performance UI or not"), FConsoleCommandWithWorldArgsAndOutputDeviceDelegate::CreateLambda([](const TArray<FString>& Args, UWorld*, FOutputDevice& Ar)
+{
+    GFoundryFXEnabled = !GFoundryFXEnabled;
+}));
 FDFX_Thread::FDFX_Thread()
 {
   // ImGui
@@ -69,20 +74,26 @@ void FDFX_Thread::OnGameModeInitialized(AGameModeBase* aGameMode)
   GameMode = aGameMode;
   uWorld = GameMode->GetWorld();
   GameViewport = uWorld->GetGameViewport();
-
+  if (uWorld->GetNetMode() == NM_DedicatedServer)
+  {
+      return;
+  }
   // Cleanup if PIE.
   if (hOnWorldBeginPlay.IsValid()) {
     hOnWorldBeginPlay.Reset();
     hOnViewportCreated.Reset();
 
-    if (GameViewport->OnWindowCloseRequested().GetHandle().IsValid())
+    if (GameViewport && GameViewport->OnWindowCloseRequested().GetHandle().IsValid())
     {
       GameViewport->OnWindowCloseRequested().Unbind();
     }
   }
-
+ 
   hOnWorldBeginPlay = uWorld->OnWorldBeginPlay.AddRaw(this, &FDFX_Thread::OnWorldBeginPlay);
-  GameViewport->OnWindowCloseRequested().BindRaw(this, &FDFX_Thread::OnViewportClose);
+  if(GameViewport)
+  {
+    GameViewport->OnWindowCloseRequested().BindRaw(this, &FDFX_Thread::OnViewportClose);
+  }
   hOnPipelineStateLogged = FPipelineFileCacheManager::OnPipelineStateLogged().AddRaw(this, &FDFX_Thread::OnPipelineStateLogged);
   ShaderLogTime = FApp::GetCurrentTime();
 }
@@ -108,15 +119,19 @@ void FDFX_Thread::OnWorldBeginPlay()
       hOnHUDPostRender.Reset();
     }
   }
-
-  GameViewport->GetWindow()->GetOnWindowClosedEvent().AddLambda(
-    [this](const TSharedRef<SWindow>& Window)
-    {
-      FDFX_Thread::OnViewportClose();
-    }
-  );
-
-  hOnHUDPostRender = PlayerController->GetHUD()->OnHUDPostRender.AddRaw(this, &FDFX_Thread::OnHUDPostRender);
+  if(GameViewport)
+  {
+    GameViewport->GetWindow()->GetOnWindowClosedEvent().AddLambda(
+      [this](const TSharedRef<SWindow>& Window)
+      {
+        FDFX_Thread::OnViewportClose();
+      }
+    );
+  }
+  if (PlayerController)
+  {
+    hOnHUDPostRender = PlayerController->GetHUD()->OnHUDPostRender.AddRaw(this, &FDFX_Thread::OnHUDPostRender);
+  }
 }
 
 void FDFX_Thread::OnHUDPostRender(AHUD* HUD, UCanvas* Canvas)
@@ -133,11 +148,19 @@ void FDFX_Thread::OnViewportCreated()
 bool FDFX_Thread::OnViewportClose()
 {
   ExternalWindow(true);
-
-  GameViewport->OnWindowCloseRequested().Unbind();
-  uWorld->OnWorldBeginPlay.Remove(hOnWorldBeginPlay);
-  PlayerController->GetHUD()->OnHUDPostRender.Remove(hOnHUDPostRender);
-
+  //D11.DH these ifs prevent a crash on closing the editor, the conditions should only be false when we're shutting down anyway
+  if(GameViewport)
+  {
+    GameViewport->OnWindowCloseRequested().Unbind();
+  }
+  if(uWorld)
+  {
+    uWorld->OnWorldBeginPlay.Remove(hOnWorldBeginPlay);
+  }
+  if(PlayerController)
+  {
+    PlayerController->GetHUD()->OnHUDPostRender.Remove(hOnHUDPostRender);
+  }
   hOnWorldBeginPlay.Reset();
   hOnHUDPostRender.Reset();
 
@@ -233,6 +256,10 @@ bool FDFX_Thread::ImGui_ImplUE_CreateDeviceObjects()
 
 void FDFX_Thread::ImGui_ImplUE_Render()
 {
+  if (!GFoundryFXEnabled)
+  {
+    return;
+  }
   const uint64 m_ImGuiBeginTime = FPlatformTime::Cycles64();
   ImGui_ImplUE_ProcessEvent();
   ImGui_ImplUE_NewFrame();
@@ -435,12 +462,9 @@ const char* FDFX_Thread::ImGui_ImplUE_GetClipboardText(void* user_data)
 
 void FDFX_Thread::ImGui_ImplUE_SetClipboardText(void* user_data, const char* text)
 {
-  int new_size = strlen(text) + 1;
-  TCHAR* new_str = new TCHAR[new_size];
-  size_t convertedChars = 0;
-  mbstowcs_s(&convertedChars, new_str, new_size, text, _TRUNCATE);
-  FGenericPlatformApplicationMisc::ClipboardCopy(new_str);
-  delete[] new_str;
+  FString Str(strlen(text), text);
+
+  FGenericPlatformApplicationMisc::ClipboardCopy(*Str);
 }
 
 bool FDFX_Thread::ControllerInput()
@@ -460,7 +484,10 @@ bool FDFX_Thread::ControllerInput()
   }
 
   if (FDFX_StatData::bMainWindowOpen && !FDFX_StatData::bDisableGameControls) {
-    aPawn->EnableInput(PlayerController);
+    if (aPawn)
+    {
+        aPawn->EnableInput(PlayerController);
+    }
     bControllerDisabled = false;
     return true;
   }
@@ -588,7 +615,7 @@ bool FDFX_Thread::HasThreadStopped()
 
 ImGuiKey FDFX_Thread::FKeyToImGuiKey(FName Keyname)
 {
-#define LITERAL_TRANSLATION(Key) { EKeys::##Key.GetFName(), ImGuiKey_##Key }
+#define LITERAL_TRANSLATION(Key) { EKeys::Key.GetFName(), ImGuiKey_##Key }
   // not an exhaustive mapping, some keys are missing :^|
   static const TMap<FName, ImGuiKey> FKeyToImGuiKey =
   {

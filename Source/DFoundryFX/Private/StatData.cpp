@@ -1154,7 +1154,10 @@ void FDFX_StatData::Tab_Settings()
 
   ImGui::EndTabItem();
 }
-
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wformat-security"
+#endif
 void FDFX_StatData::Tab_Debug()
 {
   char s_EnabledStats[32];
@@ -1203,7 +1206,9 @@ void FDFX_StatData::Tab_Debug()
 
   ImGui::EndTabItem();
 }
-
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 void FDFX_StatData::LoadDefaultValues(FVector2D InViewportSize)
 {
   ViewSize = InViewportSize;
@@ -1358,7 +1363,10 @@ void FDFX_StatData::LoadSTAT(FDFX_StatData::EStatHeader InHeader, FString InList
 void FDFX_StatData::LoadCVAR()
 {
 }
-
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wformat-security"
+#endif
 void FDFX_StatData::DrawSTAT(FDFX_StatData::EStatHeader InHeader, FString InFilter)
 {
   bool tmpToggle = false;
@@ -1382,7 +1390,9 @@ void FDFX_StatData::DrawSTAT(FDFX_StatData::EStatHeader InHeader, FString InFilt
     }
   }
 }
-
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 void FDFX_StatData::LoadDemos()
 {
   if (ImGui::Begin("Hello Widget", nullptr, ImGuiWindowFlags_None)) {
@@ -1451,8 +1461,8 @@ void FDFX_StatData::ToggleButton(const char* str_id, bool* v)
 void FDFX_StatData::ToggleStat(FString StatName, bool& bValue)
 {
   bool bStatEnable = m_Viewport->IsStatEnabled(StatName);
-  if (bValue && !bStatEnable ||
-     !bValue && bStatEnable) {
+  if ((bValue && !bStatEnable) ||
+     (!bValue && bStatEnable)) {
     FString sCmd = FString("Stat ").Append(StatName);
     m_Viewport->ConsoleCommand(sCmd);
   }
