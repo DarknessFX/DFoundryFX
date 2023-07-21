@@ -1,22 +1,53 @@
 #include "StatData.h"
 
 #define LOCTEXT_NAMESPACE "DFX_StatData"
+DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatLoadDefault"), STAT_StatLoadDefault, STATGROUP_DFoundryFX);
+DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatUpdate"), STAT_StatUpdate, STATGROUP_DFoundryFX);
+DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatMainWin"), STAT_StatMainWin, STATGROUP_DFoundryFX);
+DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatPlotThread"), STAT_StatPlotThread, STATGROUP_DFoundryFX);
+DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatPlotFrame"), STAT_StatPlotFrame, STATGROUP_DFoundryFX);
+DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatPlotFPS"), STAT_StatPlotFPS, STATGROUP_DFoundryFX);
+
 void FDFX_StatData::RunDFoundryFX(UGameViewportClient* Viewport, uint64 ImGuiThread)
 {
   m_Viewport = Viewport;
   m_Viewport->GetViewportSize(ViewSize);
   m_ImGuiThreadTime = 0.9 * m_ImGuiThreadTime + 0.1 * (ImGuiThread * FPlatformTime::GetSecondsPerCycle64());
 
-  LoadDefaultValues(ViewSize);
+  { 
+    SCOPE_CYCLE_COUNTER(STAT_StatLoadDefault);
+    LoadDefaultValues(ViewSize);
+  }
 
-  UpdateStats();
-  MainWindow();
+  { 
+    SCOPE_CYCLE_COUNTER(STAT_StatUpdate);
+    UpdateStats();
+  }
+  { 
+    SCOPE_CYCLE_COUNTER(STAT_StatMainWin);
+    MainWindow();
+  }
 
   if (bShowPlots)
   {
-    if (pwThread.bShowPlot)  LoadThreadPlot();
-    if (pwFrame.bShowPlot)   LoadFramePlot();
-    if (pwFPS.bShowPlot)     LoadFPSPlot();
+    if (pwThread.bShowPlot) {
+      { 
+        SCOPE_CYCLE_COUNTER(STAT_StatPlotThread);
+        LoadThreadPlot();
+      }
+    }
+    if (pwFrame.bShowPlot) {
+      { 
+        SCOPE_CYCLE_COUNTER(STAT_StatPlotFrame);
+        LoadFramePlot();
+      }
+    }
+    if (pwFPS.bShowPlot) {
+      { 
+        SCOPE_CYCLE_COUNTER(STAT_StatPlotFPS);
+        LoadFPSPlot();
+      }
+    }
   }
 
   //EnableDebugWindow();
@@ -828,7 +859,7 @@ void FDFX_StatData::Tab_Shaders()
     ImGui::TableSetupColumn("Time (ms)");
     ImGui::TableSetupColumn("Count");
     ImGui::TableHeadersRow();
-    for (auto ShaderLog : ShaderCompilerLog)
+    for (FShaderCompilerLog ShaderLog : ShaderCompilerLog)
     {
       if (ShaderLog.Count == 0) 
         continue;
@@ -1154,6 +1185,7 @@ void FDFX_StatData::Tab_Settings()
 
   ImGui::EndTabItem();
 }
+
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wformat-security"
@@ -1209,6 +1241,7 @@ void FDFX_StatData::Tab_Debug()
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
+
 void FDFX_StatData::LoadDefaultValues(FVector2D InViewportSize)
 {
   ViewSize = InViewportSize;
@@ -1318,7 +1351,7 @@ void FDFX_StatData::LoadDefaultValues(FVector2D InViewportSize)
   InputLatencyTime.Erase();
   ImGuiThreadTime.Erase();
 
-  for (auto elem : aStatCmds) {
+  for (FStatCmd elem : aStatCmds) {
     if (elem.Header == FDFX_StatData::Fav)
       elem.Header = FDFX_StatData::None;
   }
@@ -1340,7 +1373,7 @@ void FDFX_StatData::LoadSTAT(FDFX_StatData::EStatHeader InHeader, FString InList
       aBase.Command = "";
       aStatCmds.Init(aBase, aList.Num());
       InList.ParseIntoArray(aList, TEXT(","), true);
-      for (auto& elem : aList) {
+      for (FString& elem : aList) {
         aBase.Command = elem;
         aStatCmds.Add(aBase);
       }
@@ -1348,8 +1381,8 @@ void FDFX_StatData::LoadSTAT(FDFX_StatData::EStatHeader InHeader, FString InList
     case 2: //EStatHeader::Common
     case 3: //EStatHeader::Perf
       InList.ParseIntoArray(aList, TEXT(","), true);
-      for (auto elem : aList) {
-        for (auto& ecmd : aStatCmds) {
+      for (FString& elem : aList) {
+        for (FStatCmd ecmd : aStatCmds) {
           if (ecmd.Command == elem) {
             ecmd.Header = InHeader;
             break;
@@ -1363,6 +1396,7 @@ void FDFX_StatData::LoadSTAT(FDFX_StatData::EStatHeader InHeader, FString InList
 void FDFX_StatData::LoadCVAR()
 {
 }
+
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wformat-security"
@@ -1393,6 +1427,7 @@ void FDFX_StatData::DrawSTAT(FDFX_StatData::EStatHeader InHeader, FString InFilt
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
+
 void FDFX_StatData::LoadDemos()
 {
   if (ImGui::Begin("Hello Widget", nullptr, ImGuiWindowFlags_None)) {
@@ -1461,8 +1496,8 @@ void FDFX_StatData::ToggleButton(const char* str_id, bool* v)
 void FDFX_StatData::ToggleStat(FString StatName, bool& bValue)
 {
   bool bStatEnable = m_Viewport->IsStatEnabled(StatName);
-  if ((bValue && !bStatEnable) ||
-     (!bValue && bStatEnable)) {
+  if (bValue && !bStatEnable ||
+     !bValue && bStatEnable) {
     FString sCmd = FString("Stat ").Append(StatName);
     m_Viewport->ConsoleCommand(sCmd);
   }

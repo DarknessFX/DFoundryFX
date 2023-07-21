@@ -1,7 +1,31 @@
 #include "Module.h"
-DEFINE_LOG_CATEGORY(LogDFoundryFX);
 
+DEFINE_LOG_CATEGORY(LogDFoundryFX);
 #define LOCTEXT_NAMESPACE "DFX_Module"
+
+DECLARE_STATS_GROUP(TEXT("DFoundryFX"), STATGROUP_DFoundryFX, STATCAT_Advanced);
+
+TSharedPtr<FDFX_Thread> DFXThread;
+
+// CVARS
+static bool GDFXEnabled = true;
+static FAutoConsoleCommand DFoundryFXEnabled(
+  TEXT("DFoundryFX.ToggleEnabled"), 
+  TEXT("Show the DFoundryFX performance UI or not."), 
+  FConsoleCommandDelegate::CreateLambda([]()
+  {
+    GDFXEnabled = !GDFXEnabled;
+    if (GDFXEnabled && !DFXThread.IsValid()) {
+      DFXThread = MakeShared<FDFX_Thread>();
+    }
+    if (!GDFXEnabled && DFXThread.IsValid()) {
+      DFXThread->Stop();
+      DFXThread.Reset();
+    }
+  })
+);
+
+
 void FDFX_Module::StartupModule()
 {
   UE_LOG(LogDFoundryFX, Log, TEXT("Module: Initializing DFoundryFX module."));
@@ -34,19 +58,38 @@ void FDFX_Module::StartupModule()
   // Load CVAR
   // FDFX_StatData::LoadCVAR();
 
-//FDFX_Thread
+  // Keep the Material and Texture loaded independent from FDFXThread
+  MasterMaterial = LoadObject<UMaterialInterface>(NULL, TEXT("Material'/DFoundryFX/M_ImGui.Material'"), NULL, LOAD_None, NULL);
+  if (MasterMaterial) {
+    MaterialInstance = UMaterialInstanceDynamic::Create(MasterMaterial, NULL);
+    MaterialInstance->AllocatePermutationResource();
+    MaterialInstance->ClearParameterValues();
+  }
+  FontTexture = UTexture2D::CreateTransient(512, 64, PF_R8G8B8A8);
+
+  MasterMaterial->AddToRoot();
+  MaterialInstance->AddToRoot();
+  FontTexture->AddToRoot();
+
+  //FDFX_Thread
   if (!FPlatformProcess::SupportsMultithreading()) {
     UE_LOG(LogDFoundryFX, Warning, TEXT("Module: Platform don't support Multithreads."));
   }
 
-  DFXThread = MakeShared<FDFX_Thread>();
+  if (GDFXEnabled) {
+    DFXThread = MakeShared<FDFX_Thread>();
+  }
 }
 
 
 void FDFX_Module::ShutdownModule()
 {
   UE_LOG(LogDFoundryFX, Log, TEXT("Module: Closing DFoundryFX module."));
-  DFXThread->Stop();
+
+  if (!GDFXEnabled && DFXThread.IsValid()) {
+    DFXThread->Stop();
+    DFXThread.Reset();
+  }
 }
 
 IMPLEMENT_MODULE(FDFX_Module, DFoundryFX)

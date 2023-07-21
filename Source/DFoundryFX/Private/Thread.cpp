@@ -1,30 +1,14 @@
 #include "Thread.h"
-#include "Module.h"
+
 #define LOCTEXT_NAMESPACE "DFX_Thread"
-static bool GFoundryFXEnabled = false;
-static FAutoConsoleCommand DFoundryFXEnabled(TEXT("DFoundryFX.ToggleEnabled"), TEXT("Toggle whether to show the DFoundryFX performance UI or not"), FConsoleCommandWithWorldArgsAndOutputDeviceDelegate::CreateLambda([](const TArray<FString>& Args, UWorld*, FOutputDevice& Ar)
-{
-    GFoundryFXEnabled = !GFoundryFXEnabled;
-}));
+
+DECLARE_CYCLE_STAT(TEXT("DFoundryFX_ThreadProcEvents"), STAT_ThreadProcEvents, STATGROUP_DFoundryFX);
+DECLARE_CYCLE_STAT(TEXT("DFoundryFX_ThreadNewFrame"), STAT_ThreadNewFrame, STATGROUP_DFoundryFX);
+DECLARE_CYCLE_STAT(TEXT("DFoundryFX_ThreadRender"), STAT_ThreadRender, STATGROUP_DFoundryFX);
+DECLARE_CYCLE_STAT(TEXT("DFoundryFX_ThreadDraw"), STAT_ThreadDraw, STATGROUP_DFoundryFX);
+
 FDFX_Thread::FDFX_Thread()
 {
-  // ImGui
-  UE_LOG(LogDFoundryFX, Log, TEXT("Thread: Initializing ImGui resources and context."));
-  MasterMaterial = LoadObject<UMaterialInterface>(NULL, TEXT("Material'/DFoundryFX/M_ImGui.Material'"), NULL, LOAD_None, NULL);
-  if (MasterMaterial) {
-    MaterialInstance = UMaterialInstanceDynamic::Create(MasterMaterial, NULL);
-    MaterialInstance->AllocatePermutationResource();
-    MaterialInstance->ClearParameterValues();
-  }
-  FontTexture = UTexture2D::CreateTransient(512, 64, PF_R8G8B8A8);
-  MasterMaterial->AddToRoot();
-  MaterialInstance->AddToRoot();
-  FontTexture->AddToRoot();
-
-  m_ImGuiContext = ImGui::CreateContext();
-  m_ImPlotContext = ImPlot::CreateContext();
-  ImGui_ImplUE_CreateDeviceObjects();
-
   // Events
   hOnGameModeInitialized = FDelegateHandle();
   hOnWorldBeginPlay = FDelegateHandle();
@@ -41,16 +25,16 @@ FDFX_Thread::~FDFX_Thread()
 {
   UE_LOG(LogDFoundryFX, Log, TEXT("Thread: Destroying DFoundryFX multithread."));
 
-  // ImGui
-  ImPlot::DestroyContext();
-  ImGui::DestroyContext();
-  MasterMaterial = NULL;
-  MaterialInstance = NULL;
-  FontTexture = NULL;
+  if (PlayerController && hOnHUDPostRender.IsValid()) {
+    PlayerController->GetHUD()->OnHUDPostRender.Remove(hOnHUDPostRender);
+    hOnHUDPostRender.Reset();
+  }
 
   // Events
-  FGameModeEvents::OnGameModeInitializedEvent().Remove(hOnGameModeInitialized);
-  hOnGameModeInitialized.Reset();
+  if (hOnGameModeInitialized.IsValid()) {
+    FGameModeEvents::OnGameModeInitializedEvent().Remove(hOnGameModeInitialized);
+    hOnGameModeInitialized.Reset();
+  }
 
   // Thread
   if (DFoundryFX_Thread != nullptr)
@@ -62,38 +46,47 @@ FDFX_Thread::~FDFX_Thread()
 
 bool FDFX_Thread::Init()
 {
-  FDFX_Thread::ImGui_ImplUE_Init();
   hOnGameModeInitialized = FGameModeEvents::OnGameModeInitializedEvent().AddRaw(this, &FDFX_Thread::OnGameModeInitialized);
   hOnViewportCreated = UGameViewportClient::OnViewportCreated().AddRaw(this, &FDFX_Thread::OnViewportCreated);
+
+  // Ignore when Engine still loading
+  if (GEngine && GEngine->GetWorldContexts().Num() != 0) {
+    // Restarting FXThread on a existing viewport.
+    int WorldContexts = GEngine->GetWorldContexts().Num();
+    for (int i = 0; i < WorldContexts; i++) {
+      if (GEngine->GetWorldContexts()[i].World()->IsGameWorld()) {
+        OnGameModeInitialized(UGameplayStatics::GetGameMode(GEngine->GetWorldContexts()[i].World()));
+        OnWorldBeginPlay();
+        break;
+      }
+    }
+  }
+
   return true;
 }
 
 // Events -> GameMode and Viewport
 void FDFX_Thread::OnGameModeInitialized(AGameModeBase* aGameMode)
 {
+  // ImGui
+  UE_LOG(LogDFoundryFX, Log, TEXT("Thread: Initializing ImGui resources and context."));
+  m_ImGuiContext = ImGui::CreateContext();
+  m_ImPlotContext = ImPlot::CreateContext();
+  ImGui_ImplUE_CreateDeviceObjects();
+  ImGui_ImplUE_Init();
+
   GameMode = aGameMode;
   uWorld = GameMode->GetWorld();
   GameViewport = uWorld->GetGameViewport();
-  if (uWorld->GetNetMode() == NM_DedicatedServer)
-  {
-      return;
-  }
-  // Cleanup if PIE.
-  if (hOnWorldBeginPlay.IsValid()) {
-    hOnWorldBeginPlay.Reset();
-    hOnViewportCreated.Reset();
 
-    if (GameViewport && GameViewport->OnWindowCloseRequested().GetHandle().IsValid())
-    {
-      GameViewport->OnWindowCloseRequested().Unbind();
-    }
-  }
- 
+  // Cleanup if PIE or second window.
+  RemoveDelegates();
+
   hOnWorldBeginPlay = uWorld->OnWorldBeginPlay.AddRaw(this, &FDFX_Thread::OnWorldBeginPlay);
-  if(GameViewport)
-  {
-    GameViewport->OnWindowCloseRequested().BindRaw(this, &FDFX_Thread::OnViewportClose);
-  }
+  hOnViewportClose = GameViewport->GetWindow()->GetOnWindowClosedEvent().AddLambda(
+  [this](const TSharedRef<SWindow>& Window) {
+    FDFX_Thread::OnViewportClose();
+  });
   hOnPipelineStateLogged = FPipelineFileCacheManager::OnPipelineStateLogged().AddRaw(this, &FDFX_Thread::OnPipelineStateLogged);
   ShaderLogTime = FApp::GetCurrentTime();
 }
@@ -119,23 +112,23 @@ void FDFX_Thread::OnWorldBeginPlay()
       hOnHUDPostRender.Reset();
     }
   }
-  if(GameViewport)
-  {
-    GameViewport->GetWindow()->GetOnWindowClosedEvent().AddLambda(
-      [this](const TSharedRef<SWindow>& Window)
-      {
+
+  if(!hOnViewportClose.IsValid()) {
+    hOnViewportClose = GameViewport->GetWindow()->GetOnWindowClosedEvent().AddLambda(
+      [this](const TSharedRef<SWindow>& Window) {
         FDFX_Thread::OnViewportClose();
-      }
-    );
+      });
   }
-  if (PlayerController)
-  {
+
+  if (PlayerController) {
     hOnHUDPostRender = PlayerController->GetHUD()->OnHUDPostRender.AddRaw(this, &FDFX_Thread::OnHUDPostRender);
   }
 }
 
 void FDFX_Thread::OnHUDPostRender(AHUD* HUD, UCanvas* Canvas)
 {
+  if (bStopping) { return; }
+
   ViewportSize = FVector2D(Canvas->SizeX, Canvas->SizeY);
   uCanvas = Canvas;
   FDFX_Thread::ImGui_ImplUE_Render();
@@ -147,25 +140,26 @@ void FDFX_Thread::OnViewportCreated()
 
 bool FDFX_Thread::OnViewportClose()
 {
-  ExternalWindow(true);
-  //D11.DH these ifs prevent a crash on closing the editor, the conditions should only be false when we're shutting down anyway
-  if(GameViewport)
-  {
-    GameViewport->OnWindowCloseRequested().Unbind();
+  //ExternalWindow(true);
+
+  RemoveDelegates();
+
+  // ImGui
+  if (m_ImGuiContext) {
+    ImPlot::DestroyContext(m_ImPlotContext);
+    ImGui::DestroyContext(m_ImGuiContext);
+
+    m_ImPlotContext = nullptr;
+    m_ImGuiContext = nullptr;
   }
-  if(uWorld)
-  {
-    uWorld->OnWorldBeginPlay.Remove(hOnWorldBeginPlay);
-  }
-  if(PlayerController)
-  {
-    PlayerController->GetHUD()->OnHUDPostRender.Remove(hOnHUDPostRender);
-  }
-  hOnWorldBeginPlay.Reset();
-  hOnHUDPostRender.Reset();
 
   ViewportSize = FVector2D::ZeroVector;
   m_ImGuiDiffTime = 0;
+
+  // Hook for the next viewport/PIE
+  hOnGameModeInitialized = FGameModeEvents::OnGameModeInitializedEvent().AddRaw(this, &FDFX_Thread::OnGameModeInitialized);
+  hOnViewportCreated = UGameViewportClient::OnViewportCreated().AddRaw(this, &FDFX_Thread::OnViewportCreated);
+
   return true;
 }
 
@@ -231,41 +225,53 @@ bool FDFX_Thread::ImGui_ImplUE_CreateDeviceObjects()
   int width, height;
   io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
 
-  UE_LOG(LogDFoundryFX, Log, TEXT("ImGui FontTexture : TexData %d x %d."), width, height);
+  if (!FDFX_Module::FontTexture_Updated) {
+    AsyncTask(ENamedThreads::GameThread, [=](){
+      UE_LOG(LogDFoundryFX, Log, TEXT("ImGui FontTexture : TexData %d x %d."), width, height);
+  
+      FDFX_Module::FontTexture->UnlinkStreaming();
+      FTexture2DMipMap& mip = FDFX_Module::FontTexture->GetPlatformData()->Mips[0];
+      void* data = mip.BulkData.Lock(LOCK_READ_WRITE);
+      int size = width * height * 4; // Fix lnt-arithmetic-overflow warning
+      FMemory::Memcpy(data, pixels, size);
+      mip.BulkData.Unlock();
 
-  FontTexture->UnlinkStreaming();
-  FTexture2DMipMap& mip = FontTexture->GetPlatformData()->Mips[0];
-  void* data = mip.BulkData.Lock(LOCK_READ_WRITE);
-  FMemory::Memcpy(data, pixels, width * height * 4);
-  mip.BulkData.Unlock();
-  FontTexture->UpdateResource();
+      FDFX_Module::FontTexture->UpdateResource();
+      FDFX_Module::MaterialInstance->SetTextureParameterValue(FName("param"), FDFX_Module::FontTexture);
+      FDFX_Module::MaterialInstance->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
+      //FDFX_Module::MaterialInstance->AllMaterialsCacheResourceShadersForRendering(); DX12 ValidateBoundUniformBuffer Crash
+      FDFX_Module::FontTexture_Updated = true;
+    });
+  }
 
   // Store our identifier
-  io.Fonts->TexID = (void*)FontTexture;
-  MaterialInstance->SetTextureParameterValue(FName("param"), FontTexture);
-  MaterialInstance->CacheShaders(EMaterialShaderPrecompileMode::Synchronous);
-  MaterialInstance->AllMaterialsCacheResourceShadersForRendering();
+  io.Fonts->TexID = (void*)FDFX_Module::FontTexture;
 
-  MasterMaterial->AddToRoot();
-  MaterialInstance->AddToRoot();
-  FontTexture->AddToRoot();
-  UE_LOG(LogDFoundryFX, Log, TEXT("ImGui FontTexture loaded."), width, height);
+  UE_LOG(LogDFoundryFX, Log, TEXT("ImGui FontTexture loaded %d x %d.."), width, height);
 
   return true;
 }
 
 void FDFX_Thread::ImGui_ImplUE_Render()
 {
-  if (!GFoundryFXEnabled)
-  {
-    return;
-  }
   const uint64 m_ImGuiBeginTime = FPlatformTime::Cycles64();
-  ImGui_ImplUE_ProcessEvent();
-  ImGui_ImplUE_NewFrame();
-  FDFX_StatData::RunDFoundryFX(GameViewport, m_ImGuiDiffTime);
-  ImGui::Render();
-  ImGui_ImplUE_RenderDrawLists();
+  { 
+    SCOPE_CYCLE_COUNTER(STAT_ThreadProcEvents);
+    ImGui_ImplUE_ProcessEvent();
+  }
+  { 
+    SCOPE_CYCLE_COUNTER(STAT_ThreadNewFrame);
+    ImGui_ImplUE_NewFrame();
+  }
+  FDFX_StatData::RunDFoundryFX(GameViewport, m_ImGuiDiffTime * 1000);
+  { 
+    SCOPE_CYCLE_COUNTER(STAT_ThreadRender);
+    ImGui::Render();
+  }
+  { 
+    SCOPE_CYCLE_COUNTER(STAT_ThreadDraw);
+    ImGui_ImplUE_RenderDrawLists();
+  }
   const uint64 m_ImGuiEndTime = FPlatformTime::Cycles64();
   m_ImGuiDiffTime = (m_ImGuiEndTime - m_ImGuiBeginTime);
 }
@@ -446,7 +452,7 @@ void FDFX_Thread::ImGui_ImplUE_RenderDrawLists()
       }
 
       // Draw triangles
-      uCanvas->K2_DrawMaterialTriangle(MaterialInstance, triangles);
+      uCanvas->K2_DrawMaterialTriangle(FDFX_Module::MaterialInstance, triangles);
       idx_buffer += pcmd->ElemCount;
     }
   }
@@ -463,7 +469,6 @@ const char* FDFX_Thread::ImGui_ImplUE_GetClipboardText(void* user_data)
 void FDFX_Thread::ImGui_ImplUE_SetClipboardText(void* user_data, const char* text)
 {
   FString Str(strlen(text), text);
-
   FGenericPlatformApplicationMisc::ClipboardCopy(*Str);
 }
 
@@ -484,8 +489,7 @@ bool FDFX_Thread::ControllerInput()
   }
 
   if (FDFX_StatData::bMainWindowOpen && !FDFX_StatData::bDisableGameControls) {
-    if (aPawn)
-    {
+    if (aPawn) {
         aPawn->EnableInput(PlayerController);
     }
     bControllerDisabled = false;
@@ -557,6 +561,52 @@ void FDFX_Thread::ExternalWindow(bool IsExiting)
 }
 
 
+void FDFX_Thread::Stop()
+{
+  SetPaused(true);
+  bStopping = true;
+
+  RemoveDelegates();
+
+  DFoundryFX_Thread->WaitForCompletion();
+
+  if (m_ImGuiContext) {
+    //ImPlot::DestroyContext(m_ImPlotContext);
+    //ImGui::DestroyContext(m_ImGuiContext);
+
+    m_ImPlotContext = nullptr;
+    m_ImGuiContext = nullptr;
+  }
+}
+
+void FDFX_Thread::RemoveDelegates() {
+  // Release all active delegates
+  if (hOnViewportCreated.IsValid()) { 
+    GameViewport->OnViewportCreated().Remove(hOnViewportCreated);
+    hOnViewportCreated.Reset();
+  }
+  if (hOnViewportClose.IsValid()) { 
+    GameViewport->GetWindow()->GetOnWindowClosedEvent().Remove(hOnViewportClose);
+    hOnViewportClose.Reset();
+  }
+  if (hOnHUDPostRender.IsValid()) { 
+    PlayerController->GetHUD()->OnHUDPostRender.Remove(hOnHUDPostRender);
+    hOnHUDPostRender.Reset();
+  }
+  if (hOnGameModeInitialized.IsValid()) {
+    FGameModeEvents::OnGameModeInitializedEvent().Remove(hOnGameModeInitialized);
+    hOnGameModeInitialized.Reset();
+  }
+  if (hOnPipelineStateLogged.IsValid()) {
+    FPipelineFileCacheManager::OnPipelineStateLogged().Remove(hOnPipelineStateLogged);
+    hOnPipelineStateLogged.Reset();
+  }
+  if (hOnWorldBeginPlay.IsValid()) {
+    uWorld->OnWorldBeginPlay.Remove(hOnWorldBeginPlay);
+    hOnWorldBeginPlay.Reset();
+  }
+}
+
 // *******************
 // Whatever
 // *******************
@@ -567,22 +617,11 @@ void FDFX_Thread::Wait(float Seconds)
 
 void FDFX_Thread::Tick()
 {
-  DFXTick();
-}
-
-void FDFX_Thread::DFXTick()
-{
 }
 
 uint32 FDFX_Thread::Run()
 {
   return 0;
-}
-
-void FDFX_Thread::Stop()
-{
-  SetPaused(true);
-  bStopping = true;
 }
 
 void FDFX_Thread::Exit()
