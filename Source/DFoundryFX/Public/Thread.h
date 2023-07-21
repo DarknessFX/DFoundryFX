@@ -10,6 +10,8 @@
 
 // Events -> GameMode and Viewport
 #include "UnrealClient.h"
+#include "Kismet/GameplayStatics.h"
+#include "Engine/World.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/GameViewportDelegates.h"
 #include "GameFramework/GameModeBase.h"
@@ -25,12 +27,11 @@
 #include "Engine/Canvas.h"
 #include "GameFramework/PlayerController.h"
 #include "GenericPlatform/GenericPlatformApplicationMisc.h"
-#include "Materials/MaterialInstance.h"
-#include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
 #include "ImGui/imgui.h"
 
 // Stats
+#include "Module.h"
 #include "StatData.h"
 
 class DFOUNDRYFX_API FDFX_Thread : public FRunnable, FSingleThreadRunnable
@@ -42,7 +43,6 @@ public:  //Thread
   void Wait(float Seconds);
   virtual FSingleThreadRunnable* GetSingleThreadInterface() override { return this; }
   virtual void Tick() override;
-  virtual void DFXTick();
 
   virtual bool Init() override;
   virtual uint32 Run() override;
@@ -100,11 +100,6 @@ public:  // ImGui
   static const char* ImGui_ImplUE_GetClipboardText(void* user_data);
   static void ImGui_ImplUE_SetClipboardText(void* user_data, const char* text);
 
-  UMaterialInterface* MasterMaterial = nullptr;
-  UMaterialInstanceDynamic* MaterialInstance = nullptr;
-  UTexture2D* FontTexture = nullptr;
-
-
 private:
   FORCEINLINE ImGuiIO& GetImGuiIO() const;
   ImGuiContext* m_ImGuiContext = nullptr;
@@ -115,8 +110,10 @@ private:
   static ImGuiKey FKeyToImGuiKey(FName Keyname);
 
   bool ControllerInput();
-  void ExternalWindow(bool IsExiting = false);
 
+  void RemoveDelegates();
+
+  void ExternalWindow(bool IsExiting = false);
   TSharedPtr<SWindow> m_extWindow = nullptr;
   bool bExternalOpened = false;
 

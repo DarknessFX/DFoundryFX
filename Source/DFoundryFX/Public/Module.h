@@ -1,7 +1,9 @@
 #pragma once
 
-#include "Thread.h"
 #include "Modules/ModuleManager.h"
+#include "Materials/MaterialInstance.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Thread.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogDFoundryFX, Log, All);
 
@@ -22,6 +24,8 @@ public:
   virtual void ShutdownModule() override;
   virtual bool IsGameModule() const override { return true; }
 
-private:
-  TSharedPtr<FDFX_Thread> DFXThread;
+  static inline UMaterialInterface* MasterMaterial = nullptr;
+  static inline UMaterialInstanceDynamic* MaterialInstance = nullptr;
+  static inline UTexture2D* FontTexture = nullptr;
+  static inline bool FontTexture_Updated = false;
 };
