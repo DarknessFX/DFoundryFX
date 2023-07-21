@@ -9,9 +9,7 @@ public class DFoundryFX : ModuleRules
 
     PublicIncludePaths.AddRange(
 			new string[] {
-        Path.Combine(ModuleDirectory, "Public")//,
-        //Path.Combine(PluginDirectory, "Source/Thirdparty/ImGui/imgui"),
-        //Path.Combine(PluginDirectory, "Source/Thirdparty/ImGui/implot"),
+        Path.Combine(ModuleDirectory, "Public"),
       }
 		);
 
@@ -53,19 +51,6 @@ public class DFoundryFX : ModuleRules
       }
     );
 
-    //if (Target.Configuration == UnrealTargetConfiguration.Shipping || Target.Configuration == UnrealTargetConfiguration.Test)
-    //{
-    //        PublicAdditionalLibraries.Add(
-    //          Path.Combine(PluginDirectory, "Binaries/Win64/ImGui.lib")
-    //        );
-    //    }
-    //else
-    //{
-    //        PublicAdditionalLibraries.Add(
-    //          Path.Combine(PluginDirectory, "Binaries/Win64/ImGui_Debug.lib")
-    //        );
-    //    }
-
     // EXTRA STUFF
     PublicDefinitions.Add("WITH_IMGUI=1");
 
@@ -85,6 +70,6 @@ public class DFoundryFX : ModuleRules
     bLegacyPublicIncludePaths = false;
     //ShadowVariableWarningLevel = WarningLevel.Error;
     bTreatAsEngineModule = true;
-    PrivateDefinitions.Add("RUNTIME_LOADER_ENABLED=1");
+    //PrivateDefinitions.Add("RUNTIME_LOADER_ENABLED=1");
   }
 }
