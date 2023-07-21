@@ -1,7 +1,7 @@
 {
   "FileVersion": 3,
   "Version": 1,
-  "VersionName": "0.96",
+  "VersionName": "0.97",
   "FriendlyName": "DFoundryFX",
   "Description": "Customizable performance metric charts (including Shipping builds), Shader compiler monitor and STAT commands control panel.",
   "Category": "Performance",
