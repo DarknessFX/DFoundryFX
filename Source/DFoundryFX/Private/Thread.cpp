@@ -25,16 +25,7 @@ FDFX_Thread::~FDFX_Thread()
 {
   UE_LOG(LogDFoundryFX, Log, TEXT("Thread: Destroying DFoundryFX multithread."));
 
-  if (PlayerController && hOnHUDPostRender.IsValid()) {
-    PlayerController->GetHUD()->OnHUDPostRender.Remove(hOnHUDPostRender);
-    hOnHUDPostRender.Reset();
-  }
-
-  // Events
-  if (hOnGameModeInitialized.IsValid()) {
-    FGameModeEvents::OnGameModeInitializedEvent().Remove(hOnGameModeInitialized);
-    hOnGameModeInitialized.Reset();
-  }
+  RemoveDelegates();
 
   // Thread
   if (DFoundryFX_Thread != nullptr)
