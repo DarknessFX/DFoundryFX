@@ -450,16 +450,26 @@ void FDFX_Thread::ImGui_ImplUE_RenderDrawLists()
 
 const char* FDFX_Thread::ImGui_ImplUE_GetClipboardText(void* user_data)
 {
+// Removed for Android builds
+/*
   FString text;
   FGenericPlatformApplicationMisc::ClipboardPaste(text);
-  // FTCHARToUTF8 result(*text);  result.Get();
-  return FTCHARToUTF8(*text).Get();
+  FTCHARToUTF8 result(*text);
+  return result.Get();
+*/
+  return nullptr;
 }
 
 void FDFX_Thread::ImGui_ImplUE_SetClipboardText(void* user_data, const char* text)
 {
-  FString Str(strlen(text), text);
-  FGenericPlatformApplicationMisc::ClipboardCopy(*Str);
+/*
+  int new_size = strlen(text) + 1;
+  TCHAR* new_str = new TCHAR[new_size];
+  size_t convertedChars = 0;
+  mbstowcs_s(&convertedChars, new_str, new_size, text, _TRUNCATE);
+  FGenericPlatformApplicationMisc::ClipboardCopy(new_str);
+  delete[] new_str;
+*/
 }
 
 bool FDFX_Thread::ControllerInput()
