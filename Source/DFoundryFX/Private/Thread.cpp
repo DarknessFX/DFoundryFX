@@ -1,7 +1,6 @@
 #include "Thread.h"
 
 #define LOCTEXT_NAMESPACE "DFX_Thread"
-
 DECLARE_CYCLE_STAT(TEXT("DFoundryFX_ThreadProcEvents"), STAT_ThreadProcEvents, STATGROUP_DFoundryFX);
 DECLARE_CYCLE_STAT(TEXT("DFoundryFX_ThreadNewFrame"), STAT_ThreadNewFrame, STATGROUP_DFoundryFX);
 DECLARE_CYCLE_STAT(TEXT("DFoundryFX_ThreadRender"), STAT_ThreadRender, STATGROUP_DFoundryFX);
@@ -453,8 +452,8 @@ const char* FDFX_Thread::ImGui_ImplUE_GetClipboardText(void* user_data)
 {
   FString text;
   FGenericPlatformApplicationMisc::ClipboardPaste(text);
-  FTCHARToUTF8 result(*text);
-  return result.Get();
+  // FTCHARToUTF8 result(*text);  result.Get();
+  return FTCHARToUTF8(*text).Get();
 }
 
 void FDFX_Thread::ImGui_ImplUE_SetClipboardText(void* user_data, const char* text)

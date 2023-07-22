@@ -3,8 +3,6 @@
 DEFINE_LOG_CATEGORY(LogDFoundryFX);
 #define LOCTEXT_NAMESPACE "DFX_Module"
 
-DECLARE_STATS_GROUP(TEXT("DFoundryFX"), STATGROUP_DFoundryFX, STATCAT_Advanced);
-
 TSharedPtr<FDFX_Thread> DFXThread;
 
 // CVARS

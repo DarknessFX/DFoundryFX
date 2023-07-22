@@ -11,7 +11,19 @@ DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatPlotFPS"), STAT_StatPlotFPS, STATGROUP_D
 void FDFX_StatData::RunDFoundryFX(UGameViewportClient* Viewport, uint64 ImGuiThread)
 {
   m_Viewport = Viewport;
-  m_Viewport->GetViewportSize(ViewSize);
+  Viewport->GetViewportSize(ViewSize);
+
+  float DPIScale = Viewport->GetDPIScale();
+  if (DPIScale != 1.f)  {
+    ViewSize.X = ViewSize.X / DPIScale;
+    ViewSize.Y = ViewSize.Y / DPIScale;
+  }
+
+  //ViewSize.Set(m_Viewport->Viewport->GetSizeXY().X, m_Viewport->Viewport->GetSizeXY().Y);
+  UE_LOG(LogDFoundryFX, Log, TEXT("ViewScale: %f x %f"), ViewSize.X, ViewSize.Y);
+  //UE_LOG(LogDFoundryFX, Log, TEXT("ViewScale: %f"), Viewport->GetDPIScale());
+  //UE_LOG(LogDFoundryFX, Log, TEXT("ShouldDPIScaleSceneCanvas: %s "), Viewport->ShouldDPIScaleSceneCanvas() ? TEXT("true") : TEXT("false"));
+
   m_ImGuiThreadTime = 0.9 * m_ImGuiThreadTime + 0.1 * (ImGuiThread * FPlatformTime::GetSecondsPerCycle64());
 
   { 
@@ -638,7 +650,7 @@ void FDFX_StatData::Tab_Engine()
     InfoHelper("MaxParticleResize", GEngine->MaxParticleResize);
     InfoHelper("MaxParticleResizeWarn", GEngine->MaxParticleResizeWarn);
     InfoHelper("MaxPixelShaderAdditiveComplexityCount", GEngine->MaxPixelShaderAdditiveComplexityCount);
-    InfoHelper("StreamingDistanceFactor", GEngine->StreamingDistanceFactor);
+    // InfoHelper("StreamingDistanceFactor", GEngine->StreamingDistanceFactor); // Deprecated in UE5.2
     InfoHelper("UseSkeletalMeshMinLODPerQualityLevels", GEngine->UseSkeletalMeshMinLODPerQualityLevels);
     InfoHelper("UseStaticMeshMinLODPerQualityLevels", GEngine->UseStaticMeshMinLODPerQualityLevels);
 
@@ -678,7 +690,7 @@ void FDFX_StatData::Tab_Engine()
     InfoHelper("GRHISupportsAttachmentVariableRateShading", GRHISupportsAttachmentVariableRateShading);
     InfoHelper("GRHISupportsBackBufferWithCustomDepthStencil", GRHISupportsBackBufferWithCustomDepthStencil);
     InfoHelper("GRHISupportsBaseVertexIndex", GRHISupportsBaseVertexIndex);
-    InfoHelper("GRHISupportsBindless", GRHISupportsBindless);
+    //InfoHelper("GRHISupportsBindless", GRHISupportsBindless); Moved to Enum GRHIBindlessSupports
     InfoHelper("GRHISupportsComplexVariableRateShadingCombinerOps", GRHISupportsComplexVariableRateShadingCombinerOps);
     InfoHelper("GRHISupportsConservativeRasterization", GRHISupportsConservativeRasterization);
     //InfoHelper("GRHISupportsCopyToTextureMultipleMips", GRHISupportsCopyToTextureMultipleMips);
@@ -1403,6 +1415,7 @@ void FDFX_StatData::LoadCVAR()
 #endif
 void FDFX_StatData::DrawSTAT(FDFX_StatData::EStatHeader InHeader, FString InFilter)
 {
+  char* chrCmd = nullptr;
   bool tmpToggle = false;
   
   for (auto& elem : aStatCmds) {
@@ -1413,7 +1426,7 @@ void FDFX_StatData::DrawSTAT(FDFX_StatData::EStatHeader InHeader, FString InFilt
       InHeader == EStatHeader::All) {
       char s_StatCmd[32];
       char s_StatId[32];
-      char* chrCmd = TCHAR_TO_ANSI(*elem.Command);
+      chrCmd = TCHAR_TO_ANSI(*elem.Command);
       snprintf(s_StatCmd, 32, "Stat %s", chrCmd);
       snprintf(s_StatId, 32, "Stat_%s", chrCmd);
       ImGui::TableNextColumn(); ImGui::Text(s_StatCmd);
