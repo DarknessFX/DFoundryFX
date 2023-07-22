@@ -6,6 +6,7 @@
 #include "Thread.h"
 
 DECLARE_LOG_CATEGORY_EXTERN(LogDFoundryFX, Log, All);
+DECLARE_STATS_GROUP(TEXT("DFoundryFX"), STATGROUP_DFoundryFX, STATCAT_Advanced);
 
 //MODULE
 class DFOUNDRYFX_API FDFX_Module : public IModuleInterface
