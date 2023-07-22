@@ -291,6 +291,15 @@ void FDFX_Thread::ImGui_ImplUE_ProcessEvent()
       io.AddKeyEvent(m_ImGuiKey, false);
     }
 
+    if (keys[i].IsTouch()) {
+      float TouchY, TouchX;
+      bool TouchPressed;
+      PlayerController->GetInputTouchState(ETouchIndex::Touch1, TouchY, TouchX, TouchPressed);
+      io.AddMousePosEvent(TouchX, TouchY);
+      io.AddMouseButtonEvent(0, TouchPressed);
+      continue;
+    }
+
     bool keyboard = !keys[i].IsMouseButton() &&
       !keys[i].IsModifierKey() &&
       !keys[i].IsGamepadKey() &&

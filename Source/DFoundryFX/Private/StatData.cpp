@@ -19,11 +19,6 @@ void FDFX_StatData::RunDFoundryFX(UGameViewportClient* Viewport, uint64 ImGuiThr
     ViewSize.Y = ViewSize.Y / DPIScale;
   }
 
-  //ViewSize.Set(m_Viewport->Viewport->GetSizeXY().X, m_Viewport->Viewport->GetSizeXY().Y);
-  UE_LOG(LogDFoundryFX, Log, TEXT("ViewScale: %f x %f"), ViewSize.X, ViewSize.Y);
-  //UE_LOG(LogDFoundryFX, Log, TEXT("ViewScale: %f"), Viewport->GetDPIScale());
-  //UE_LOG(LogDFoundryFX, Log, TEXT("ShouldDPIScaleSceneCanvas: %s "), Viewport->ShouldDPIScaleSceneCanvas() ? TEXT("true") : TEXT("false"));
-
   m_ImGuiThreadTime = 0.9 * m_ImGuiThreadTime + 0.1 * (ImGuiThread * FPlatformTime::GetSecondsPerCycle64());
 
   { 
