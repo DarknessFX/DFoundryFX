@@ -16,19 +16,17 @@
 
 <img src="https://github.com/DarknessFX/DFoundryFX/raw/eea015c01c242c5107f6b47a4e32e807e9e6de8d/.git_img/screenshot01.png" width="640px" /> <br/>
 
+## About
+
 DFoundryFX plugin feature customizable performance metric charts (including Shipping builds), 
 Shader compiler monitoring and STAT commands control panel for Unreal Engine GameViewports. 
 While the plugin is enabled you always have access to the charts, controls and settings 
 directly in your game viewport, this plugin don't need actors or objects to be created 
 in your project.<br/>
 
-## About
-
-(WIP) 
-
 ## Installation
 
-### Use precompiled plugin (Unreal Engine 5.1 only)
+### Use precompiled plugin (Unreal Engine 5.1 or newer)
 
 . Download the latest <a href="https://github.com/DarknessFX/DFoundryFX/releases" target="_blank">release</a>. <br/>
 . Unzip the file in your UEFolder\Engine\Plugins. <br/>
@@ -52,10 +50,6 @@ in your project.<br/>
 . Open your project in VisualStudio and build.<br/>
 . Open your project, enabled DFoundryFX in Plugins tab (Installed > Perfomance > DFoundryFX). <br/>
 . Play your project, DFoundryFX window and charts will show up.<br/>
-
-## Compatibility with Unreal Engine 5.0
-
-(WIP)
 
 ## Credits
 
