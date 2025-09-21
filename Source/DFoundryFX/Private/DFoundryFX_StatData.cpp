@@ -70,7 +70,6 @@ void FDFX_StatData::RunDFoundryFX(uint64 ImGuiThreadTimeMs) {
   {
     SCOPE_CYCLE_COUNTER(STAT_StatMainWin);
     RenderMainWindow();
-    RenderCustomWindow();
   }
 
   if (bShowPlots) {
