@@ -12,7 +12,7 @@
 
            DarknessFX @ https://dfx.lv | Twitter: @DrkFX
 
-# DFoundryFX plugin For Unreal Engine 5
+# DFoundryFX plugin For Unreal Engine 5.6
 
 <img src="https://github.com/DarknessFX/DFoundryFX/raw/eea015c01c242c5107f6b47a4e32e807e9e6de8d/.git_img/screenshot01.png" width="640px" /> <br/>
 
@@ -26,7 +26,7 @@ in your project.<br/>
 
 ## Installation
 
-### Use precompiled plugin (Unreal Engine 5.1 or newer)
+### Use precompiled plugin (Unreal Engine 5.6 or newer)
 
 . Download the latest <a href="https://github.com/DarknessFX/DFoundryFX/releases" target="_blank">release</a>. <br/>
 . Unzip the file in your UEFolder\Engine\Plugins. <br/>
@@ -42,11 +42,7 @@ in your project.<br/>
 . Play your project, DFoundryFX window and charts will show up.<br/>
 
 ### Build from Source
-. Create a new folder.  ex: *Plugins\* <br/>
-. Git clone this project with sub-modules.  ex: *git clone --recursive https://github.com/DarknessFX/DFoundryFX.git*<br/>
-. Open your "**Developer Command Prompt for VisualStudio**" (*Program Files\Microsoft Visual Studio\Common7\Tools\VsDevCmd.bat*).<br/>
-. Execute *Plugins\DFoundryFX\Source\ThirdParty\ImGui\Build.bat* .<br/>
-. Copy Plugins\ folder to your project folder (or to your Engine\Plugins folder).<br/>
+. Copy DFoundryFX to your project Plugins folder (or to your Engine\Plugins folder).<br/>
 . Open your project in VisualStudio and build.<br/>
 . Open your project, enabled DFoundryFX in Plugins tab (Installed > Perfomance > DFoundryFX). <br/>
 . Play your project, DFoundryFX window and charts will show up.<br/>
