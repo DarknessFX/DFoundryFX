@@ -1,4 +1,5 @@
 #include "DFoundryFX_StatData.h"
+#include "DFoundryFX_Module.h"
 #include <type_traits>
 
 DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatLoadDefault"), STAT_StatLoadDefault, STATGROUP_DFoundryFX);
