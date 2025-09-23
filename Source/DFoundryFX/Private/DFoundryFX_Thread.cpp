@@ -84,8 +84,7 @@ void FDFX_Thread::OnGameModeInitialized(AGameModeBase* aGameMode) {
 }
 
 
-void FDFX_Thread::OnWorldBeginPlay()
-{
+void FDFX_Thread::OnWorldBeginPlay() {
   ViewportSize = FVector2D::ZeroVector;
 
   // Fix for GameMode HUD Class = None
@@ -112,8 +111,7 @@ void FDFX_Thread::OnWorldBeginPlay()
   }
 }
 
-void FDFX_Thread::OnHUDPostRender(AHUD* HUD, UCanvas* Canvas)
-{
+void FDFX_Thread::OnHUDPostRender(AHUD* HUD, UCanvas* Canvas) {
   if (bStopping) { return; }
 
   ViewportSize = FVector2D(Canvas->SizeX, Canvas->SizeY);
@@ -125,7 +123,6 @@ void FDFX_Thread::OnViewportCreated() {
 }
 
 void FDFX_Thread::OnViewportResized(FViewport* Viewport, uint32 /*Unused*/) {
-  // Load StatData Defaults
   FDFX_StatData::LoadDefaultValues(GameViewport.Get());
 }
 
@@ -255,24 +252,17 @@ bool FDFX_Thread::ImGui_ImplUE_CreateDeviceObjects() {
 
 void FDFX_Thread::ImGui_ImplUE_Render() {
   const uint64 m_ImGuiBeginTime = FPlatformTime::Cycles64();
-  { 
-    SCOPE_CYCLE_COUNTER(STAT_ThreadProcEvents);
-    ImGui_ImplUE_ProcessEvent();
-  }
-  { 
-    SCOPE_CYCLE_COUNTER(STAT_ThreadNewFrame);
-    ImGui_ImplUE_NewFrame();
-  }
+  { SCOPE_CYCLE_COUNTER(STAT_ThreadProcEvents);
+    ImGui_ImplUE_ProcessEvent(); }
+  { SCOPE_CYCLE_COUNTER(STAT_ThreadNewFrame);
+    ImGui_ImplUE_NewFrame(); }
 
   FDFX_StatData::RunDFoundryFX(m_ImGuiDiffTime * 1000);
-  {
-    SCOPE_CYCLE_COUNTER(STAT_ThreadRender);
-    ImGui::Render();
-  }
-  {
-    SCOPE_CYCLE_COUNTER(STAT_ThreadDraw);
-    ImGui_ImplUE_RenderDrawLists();
-  }
+
+  { SCOPE_CYCLE_COUNTER(STAT_ThreadRender);
+    ImGui::Render(); }
+  { SCOPE_CYCLE_COUNTER(STAT_ThreadDraw);
+    ImGui_ImplUE_RenderDrawLists(); }
 
   const uint64 m_ImGuiEndTime = FPlatformTime::Cycles64();
   m_ImGuiDiffTime = (m_ImGuiEndTime - m_ImGuiBeginTime);
@@ -366,7 +356,7 @@ void FDFX_Thread::ImGui_ImplUE_NewFrame() {
   if (FMath::Abs(WheelDelta) > KINDA_SMALL_NUMBER) { io.AddMouseWheelEvent(0.0f, WheelDelta); } // X=0, Y=WheelDelta
 
   io.DisplaySize = ImVec2((float)ViewportSize.X, (float)ViewportSize.Y);
-  //io.DisplayFramebufferScale = ImVec2(1, 1);
+  io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f); // HACK to disable ImGui DPI scale, more details at FDFX_StatData::LoadDefaultValues
 
   ImGui::NewFrame();
 }
@@ -506,40 +496,7 @@ void FDFX_Thread::ImGui_ImplUE_SetClipboardText(void* user_data, const char* tex
 }
 
 bool FDFX_Thread::HandleControllerInput() {
-  static bool bControllerDisabled = false;
-  static bool bMainWindowStillOpen = false;
-
   if (!PlayerController.IsValid()) { return false; }
-
-  //if (!FDFX_StatData::bMainWindowOpen && !bMainWindowStillOpen) { return false; }
-  
-  //APawn* Pawn = PlayerController.Get()->GetPawn();
-
-  //if (!FDFX_StatData::bMainWindowOpen && bControllerDisabled) {
-  //  if (Pawn) {
-  //    Pawn->EnableInput(PlayerController.Get());
-  //  }
-  //  bControllerDisabled = false;
-  //  bMainWindowStillOpen = false;
-  //  return true;
-  //}
-
-  //if (FDFX_StatData::bMainWindowOpen && !FDFX_StatData::bDisableGameControls) {
-  //  if (Pawn) {
-  //    Pawn->EnableInput(PlayerController.Get());
-  //  }
-  //  bControllerDisabled = false;
-  //  return true;
-  //}
-
-  //if (FDFX_StatData::bDisableGameControls && FDFX_StatData::bMainWindowOpen) {
-  //  if (Pawn) {
-  //    Pawn->DisableInput(PlayerController.Get());
-  //  }
-  //  bMainWindowStillOpen = true;
-  //  bControllerDisabled = true;
-  //}
-
   return true;
 }
 
@@ -596,40 +553,6 @@ void FDFX_Thread::RemoveDelegates() {
   }
 }
 
-// *******************
-// Whatever
-// *******************
-void FDFX_Thread::Wait(float Seconds) {
-  FPlatformProcess::Sleep(Seconds);
-}
-
-uint32 FDFX_Thread::Run() {
-  return 0;
-}
-
-void FDFX_Thread::Tick() { }
-
-void FDFX_Thread::Exit() { }
-
-void FDFX_Thread::SetPaused(bool MakePaused) {
-  bThreadPaused.AtomicSet(MakePaused);
-  if (!MakePaused) {
-    bIsVerifiedSuspended.AtomicSet(false);
-  }
-}
-
-bool FDFX_Thread::IsThreadPaused() const {
-  return bThreadPaused;
-}
-
-bool FDFX_Thread::IsThreadVerifiedSuspended() const {
-  return bIsVerifiedSuspended;
-}
-
-bool FDFX_Thread::HasThreadStopped() const {
-  return bHasStopped;
-}
-
 ImGuiKey FDFX_Thread::FKeyToImGuiKey(FName KeyName) {
   #define LITERAL_TRANSLATION(Key) { EKeys::Key.GetFName(), ImGuiKey_##Key }
   static const TMap<FName, ImGuiKey> KeyMap = {
@@ -666,6 +589,40 @@ ImGuiKey FDFX_Thread::FKeyToImGuiKey(FName KeyName) {
 
   const ImGuiKey* FoundKey = KeyMap.Find(KeyName);
   return FoundKey ? *FoundKey : ImGuiKey_None;
+}
+
+// *******************
+// Thread
+// *******************
+void FDFX_Thread::Wait(float Seconds) {
+  FPlatformProcess::Sleep(Seconds);
+}
+
+uint32 FDFX_Thread::Run() {
+  return 0;
+}
+
+void FDFX_Thread::Tick() { }
+
+void FDFX_Thread::Exit() { }
+
+void FDFX_Thread::SetPaused(bool MakePaused) {
+  bThreadPaused.AtomicSet(MakePaused);
+  if (!MakePaused) {
+    bIsVerifiedSuspended.AtomicSet(false);
+  }
+}
+
+bool FDFX_Thread::IsThreadPaused() const {
+  return bThreadPaused;
+}
+
+bool FDFX_Thread::IsThreadVerifiedSuspended() const {
+  return bIsVerifiedSuspended;
+}
+
+bool FDFX_Thread::HasThreadStopped() const {
+  return bHasStopped;
 }
 
 #undef LOCTEXT_NAMESPACE

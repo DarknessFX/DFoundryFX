@@ -5,8 +5,8 @@
 #include "Engine/GameViewportClient.h"
 #include "UnrealClient.h"
 #include "Misc/App.h"
+#include "GenericPlatform/GenericApplication.h"
 #include "GameFramework/PlayerController.h"
-#include "GenericPlatform/GenericPlatformMisc.h"
 #include "RHI.h"
 #include "Stats/Stats.h"
 #include "Stats/StatsData.h"
@@ -29,41 +29,50 @@ public:
   static void AddShaderLog(int32 LogType, const FString& ShaderHash, double CompileTime);
 
   static bool bMainWindowExpanded;
+
+  static bool bHasPendingChanges;
+  static void ApplyPendingChanges();
 private:
 
   static UGameViewportClient* ViewportClient;
   static FVector2D ViewportSize;
+  static FDisplayMetrics DisplayMetrics;
 
   static void UpdateStats();
   static void RenderMainWindow();
 
+  // Main Window Tabs
   static void RenderEngineTab();
+  static void RenderEngineTab_Data();
   static void RenderShadersTab();
   static void RenderStatTab();
   static void RenderSettingsTab();
   static void RenderDebugTab();
 
-  struct FContextInfoEntry {
-    FName Label;
-    TFunction<FString()> ValueGetter;
-  };
+  // ImPlot
+  static void RenderPlotThreads();
+  static void RenderPlotFrametime();
+  static void RenderPlotFramerate();
 
-  static void InitEngineContextEntries();
-  static TArray<FContextInfoEntry> Engine_MemoryEntries;
-  static TArray<FContextInfoEntry> Engine_ViewportEntries;
-  static TArray<FContextInfoEntry> Engine_GEngineEntries;
-  static TArray<FContextInfoEntry> Engine_RHIEntries;
-  static TArray<FContextInfoEntry> Engine_PlatformEntries;
+  enum class EPlotType {
+    Threads,
+    Frametime,
+    Framerate
+  };
+  static void RenderPlotStyleBegin(EPlotType Type);
+  static void RenderPlotStyleEnd();
+
+  static double ImPlotFrameCount;
 
   static bool bShowPlots;
   static bool bSortPlots;
   static bool bShowDebugTab;
 
   static const int32 MaxStatHistory = 10;
-  static float GlobalStatHistoryDuration; // seconds
+  static float GlobalStatHistoryDuration;
 
   struct FPlotConfig {
-    FPlotConfig() = default; // Avoid Clang constructor bug
+    FPlotConfig() = default;
     bool bVisible = true;
     float HistoryDuration = 3.0f;
     ImVec2 Range = ImVec2(0, 0);
@@ -78,9 +87,9 @@ private:
     float MarkerLineWidth = 16.667f;
     float MarkerThickness = 1.0f;
   };
-  static FPlotConfig ThreadPlotConfig;
-  static FPlotConfig FramePlotConfig;
-  static FPlotConfig FPSPlotConfig;
+  static FPlotConfig PlotConfigThreads;
+  static FPlotConfig PlotConfigFramerate;
+  static FPlotConfig PlotConfigFrametime;
 
   struct FThreadPlotStyle {
     bool bShowFramePlot;
@@ -88,10 +97,6 @@ private:
     ImVec4 ShadeColor;
   };
   static FThreadPlotStyle ThreadPlotStyles[7];
-
-  static void LoadThreadPlotConfig();
-  static void LoadFramePlotConfig();
-  static void LoadFPSPlotConfig();
 
   static const int32 MaxHistorySize = 600;
   struct FHistoryBuffer {
@@ -119,6 +124,7 @@ private:
     }
   };
 
+  // Real-time data
   static double CurrentTime;
   static double LastTime;
   static double DeltaTime;
@@ -133,7 +139,6 @@ private:
   static float InputLatencyTime;
   static float ImGuiThreadTime;
 
-  static double ImPlotFrameCount;
   static FHistoryBuffer TimeHistory;
   static FHistoryBuffer FrameCountHistory;
   static FHistoryBuffer FrameTimeHistory;
@@ -146,7 +151,7 @@ private:
   static FHistoryBuffer InputLatencyTimeHistory;
   static FHistoryBuffer ImGuiThreadTimeHistory;
 
-  static inline ImGuiWindowFlags MainWindowFlags = ImGuiWindowFlags_NoTitleBar
+  static inline ImGuiWindowFlags PlotWindowFlags = ImGuiWindowFlags_NoTitleBar
     | ImGuiWindowFlags_NoBringToFrontOnFocus
     | ImGuiWindowFlags_NoFocusOnAppearing
     | ImGuiWindowFlags_NoCollapse
@@ -185,6 +190,7 @@ private:
 
   static void RenderStats(EDFXStatCategory InCategory, const FString& Filter = TEXT(""));
 
+  // Shader Compiler
   struct FShaderCompileLog {
     int32 Type;
     int32 Count;

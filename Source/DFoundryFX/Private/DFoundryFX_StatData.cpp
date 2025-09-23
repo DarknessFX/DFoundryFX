@@ -1,27 +1,30 @@
 #include "DFoundryFX_StatData.h"
 #include "DFoundryFX_Module.h"
+#include "GameFramework/GameUserSettings.h"
 #include <type_traits>
 
 DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatLoadDefault"), STAT_StatLoadDefault, STATGROUP_DFoundryFX);
 DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatUpdate"), STAT_StatUpdate, STATGROUP_DFoundryFX);
 DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatMainWin"), STAT_StatMainWin, STATGROUP_DFoundryFX);
-DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatPlotThread"), STAT_StatPlotThread, STATGROUP_DFoundryFX);
-DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatPlotFrame"), STAT_StatPlotFrame, STATGROUP_DFoundryFX);
-DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatPlotFPS"), STAT_StatPlotFPS, STATGROUP_DFoundryFX);
+DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatPlotThreads"), STAT_StatPlotThreads, STATGROUP_DFoundryFX);
+DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatPlotFrametime"), STAT_StatPlotFrametime, STATGROUP_DFoundryFX);
+DECLARE_CYCLE_STAT(TEXT("DFoundryFX_StatPlotFPS"), STAT_StatPlotFramerate, STATGROUP_DFoundryFX);
 
 UGameViewportClient* FDFX_StatData::ViewportClient = nullptr;
 FVector2D FDFX_StatData::ViewportSize = FVector2D::ZeroVector;
+FDisplayMetrics FDFX_StatData::DisplayMetrics;
 
 bool FDFX_StatData::bMainWindowExpanded = true;
+bool FDFX_StatData::bHasPendingChanges = false;
 bool FDFX_StatData::bShowPlots = true;
 bool FDFX_StatData::bSortPlots = true;
 bool FDFX_StatData::bShowDebugTab = true;
 
 float FDFX_StatData::GlobalStatHistoryDuration = 3.0f;
 
-FDFX_StatData::FPlotConfig FDFX_StatData::ThreadPlotConfig;
-FDFX_StatData::FPlotConfig FDFX_StatData::FramePlotConfig;
-FDFX_StatData::FPlotConfig FDFX_StatData::FPSPlotConfig;
+FDFX_StatData::FPlotConfig FDFX_StatData::PlotConfigThreads;
+FDFX_StatData::FPlotConfig FDFX_StatData::PlotConfigFramerate;
+FDFX_StatData::FPlotConfig FDFX_StatData::PlotConfigFrametime;
 
 FDFX_StatData::FThreadPlotStyle FDFX_StatData::ThreadPlotStyles[7];
 
@@ -54,16 +57,8 @@ FDFX_StatData::FHistoryBuffer FDFX_StatData::ImGuiThreadTimeHistory;
 
 TArray<FDFX_StatData::FShaderCompileLog> FDFX_StatData::ShaderCompileLogs;
 
-TArray<FDFX_StatData::FContextInfoEntry> FDFX_StatData::Engine_MemoryEntries;
-TArray<FDFX_StatData::FContextInfoEntry> FDFX_StatData::Engine_ViewportEntries;
-TArray<FDFX_StatData::FContextInfoEntry> FDFX_StatData::Engine_GEngineEntries;
-TArray<FDFX_StatData::FContextInfoEntry> FDFX_StatData::Engine_RHIEntries;
-TArray<FDFX_StatData::FContextInfoEntry> FDFX_StatData::Engine_PlatformEntries;
-
 void FDFX_StatData::RunDFoundryFX(uint64 ImGuiThreadTimeMs) {
-  //ViewportClient->GetViewportSize(ViewportSize);
   ImGuiThreadTime = 0.9f * ImGuiThreadTime + 0.1f * (static_cast<float>(ImGuiThreadTimeMs) * FPlatformTime::GetSecondsPerCycle64());
-
   {
     SCOPE_CYCLE_COUNTER(STAT_StatUpdate);
     UpdateStats();
@@ -74,22 +69,22 @@ void FDFX_StatData::RunDFoundryFX(uint64 ImGuiThreadTimeMs) {
   }
 
   if (bShowPlots) {
-    if (ThreadPlotConfig.bVisible) {
+    if (PlotConfigThreads.bVisible) {
       {
-        SCOPE_CYCLE_COUNTER(STAT_StatPlotThread);
-        LoadThreadPlotConfig();
+        SCOPE_CYCLE_COUNTER(STAT_StatPlotThreads);
+        RenderPlotThreads();
       }
     }
-    if (FramePlotConfig.bVisible) {
+    if (PlotConfigFramerate.bVisible) {
       {
-        SCOPE_CYCLE_COUNTER(STAT_StatPlotFrame);
-        LoadFramePlotConfig();
+        SCOPE_CYCLE_COUNTER(STAT_StatPlotFrametime);
+        RenderPlotFrametime();
       }
     }
-    if (FPSPlotConfig.bVisible) {
+    if (PlotConfigFrametime.bVisible) {
       {
-        SCOPE_CYCLE_COUNTER(STAT_StatPlotFPS);
-        LoadFPSPlotConfig();
+        SCOPE_CYCLE_COUNTER(STAT_StatPlotFramerate);
+        RenderPlotFramerate();
       }
     }
   }
@@ -142,6 +137,13 @@ void FDFX_StatData::RenderMainWindow() {
     }
     ImGui::EndTabBar();    
   }
+#if PLATFORM_WINDOWS
+  const APlayerController* PC = ViewportClient->GetWorld()->GetFirstPlayerController();
+  bool bShouldDraw = ImGui::IsWindowHovered() && !PC->bShowMouseCursor;
+  if (bShouldDraw != ImGui::GetIO().MouseDrawCursor) {
+    ImGui::GetIO().MouseDrawCursor = bShouldDraw;
+  }
+#endif
   ImGui::End();
 }
 
@@ -190,10 +192,20 @@ void FDFX_StatData::RenderEngineTab() {
   IConsoleManager& ConsoleManager = IConsoleManager::Get();
 
   if (ImGui::CollapsingHeader("Viewport Settings")) {
-    static int32 ViewportSizeArray[2] = { static_cast<int32>(ViewportSize.X), static_cast<int32>(ViewportSize.Y) };
-    static int32 MaxFPS = ConsoleManager.FindConsoleVariable(TEXT("t.MaxFPS"))->GetInt();
+    static bool bVSyncPrev = false;
     static bool bVSync = ConsoleManager.FindConsoleVariable(TEXT("r.VSync"))->GetBool();
-    static int32 ScreenPercentage = ConsoleManager.FindConsoleVariable(TEXT("r.ScreenPercentage"))->GetInt();
+    static bool bVSyncEditorPrev = false;
+    static bool bVSyncEditor = ConsoleManager.FindConsoleVariable(TEXT("r.VSyncEditor"))->GetBool();
+    static bool bFullscreenWindowed = (ViewportClient->IsFullScreenViewport() && !ViewportClient->IsExclusiveFullscreenViewport());
+    static bool bFullscreenWindowedPrev = bFullscreenWindowed;
+    static bool bFullscreenExclusive = (ViewportClient->IsFullScreenViewport() && ViewportClient->IsExclusiveFullscreenViewport());
+    static bool bFullscreenExclusivePrev = bFullscreenExclusive;
+    static int32 ScreenResolution[2] = { ViewportSize.X, ViewportSize.Y };
+    static int32 ScreenPercentage = []() { int32 Value = IConsoleManager::Get().FindConsoleVariable(TEXT("r.ScreenPercentage"))->GetInt();
+      return Value == 0 ? 100 : Value; }();
+    static int32 MaxFPS = []() { int32 Value = IConsoleManager::Get().FindConsoleVariable(TEXT("t.MaxFPS"))->GetInt();
+      UE_LOG(LogTemp, Warning, TEXT("t.MaxFPS read as %d"), Value);
+      return Value == 0 ? 500 : Value; }();
     static int32 ResolutionQuality = ConsoleManager.FindConsoleVariable(TEXT("sg.ResolutionQuality"))->GetInt();
     static int32 ViewDistanceScale = ConsoleManager.FindConsoleVariable(TEXT("r.ViewDistanceScale"))->GetInt();
     static int32 PostProcessQuality = ConsoleManager.FindConsoleVariable(TEXT("sg.PostProcessQuality"))->GetInt();
@@ -202,395 +214,221 @@ void FDFX_StatData::RenderEngineTab() {
     static int32 EffectsQuality = ConsoleManager.FindConsoleVariable(TEXT("sg.EffectsQuality"))->GetInt();
     static int32 DetailMode = ConsoleManager.FindConsoleVariable(TEXT("r.DetailMode"))->GetInt();
     static int32 SkeletalMeshLODBias = ConsoleManager.FindConsoleVariable(TEXT("r.SkeletalMeshLODBias"))->GetInt();
-    static bool bFullscreen = ViewportClient->Viewport->IsFullscreen();
-    static bool bFullscreenExclusive = (ConsoleManager.FindConsoleVariable(TEXT("r.FullscreenMode"))->GetInt() == 1 ? false : true);
 
-    ImGui::BeginTable("##tblViewSettingsBase", 2, ImGuiTableFlags_SizingStretchProp);
+    ImGui::BeginTable("##tblWindowSettingsBase", 3, ImGuiTableFlags_SizingStretchProp);
+    ImGui::TableNextRow();
     ImGui::TableNextColumn();
-    ImGui::InputInt2("Size", ViewportSizeArray);
-    ImGui::SameLine();
+    ImGui::Text("VSync");
     ImGui::TableNextColumn();
-    if (ImGui::Button("Apply##btnVS1")) {
-      if (bFullscreen) {
-        ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.SetRes %ix%if"), ViewportSizeArray[0], ViewportSizeArray[1]));
-      } else {
-        ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.SetRes %ix%iw"), ViewportSizeArray[0], ViewportSizeArray[1]));
+    if (ImGui::Checkbox("Game", &bVSync)) {
+      if (bVSync != bVSyncPrev) {
+        ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.VSync %i"), bVSync ? 1 : 0));
       }
     }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Only work for Packaged Game Builds or Play Stand Alone Game.");
+    }
+    bVSyncPrev = bVSync;
 
     ImGui::TableNextColumn();
-    if (ImGui::Checkbox("Fullscreen", &bFullscreen)) {
-      if (bFullscreen != ViewportClient->Viewport->IsFullscreen()) {
-        if (bFullscreen) {
-          ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.SetRes %ix%if"), ViewportSizeArray[0], ViewportSizeArray[1]));
+    if (ImGui::Checkbox("Editor", &bVSyncEditor)) {
+      if (bVSyncEditor != bVSyncEditorPrev) {
+        ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.VSyncEditor %i"), bVSyncEditor ? 1 : 0));
+      }
+    }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Only work while PlayInEditor.");
+    }
+    bVSyncEditorPrev = bVSyncEditor;
+
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("Fullscreen");
+    ImGui::TableNextColumn();
+    if (ImGui::Checkbox("Windowed", &bFullscreenWindowed)) {
+      if (bFullscreenWindowed != bFullscreenWindowedPrev) {
+        if (bFullscreenWindowed) {
+          ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.SetRes %ix%iwf"), DisplayMetrics.PrimaryDisplayWidth, DisplayMetrics.PrimaryDisplayHeight));
         } else {
-          ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.SetRes %ix%iw"), ViewportSizeArray[0], ViewportSizeArray[1]));
+          ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.SetRes %ix%iw"), ScreenResolution[0], ScreenResolution[1]));
         }
       }
     }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Only work for Packaged Game Builds or Play Stand Alone Game.");
+    }
+    bFullscreenWindowedPrev = bFullscreenWindowed;
     ImGui::TableNextColumn();
-
-    ImGui::TableNextColumn();
-    if (ImGui::Checkbox("FullscreenExclusive", &bFullscreenExclusive)) {
-      if (bFullscreenExclusive != (ConsoleManager.FindConsoleVariable(TEXT("r.FullscreenMode"))->GetInt() == 1 ? false : true)) {
+    if (ImGui::Checkbox("Exclusive", &bFullscreenExclusive)) {
+      if (bFullscreenExclusive != bFullscreenExclusivePrev) {
         if (bFullscreenExclusive) {
-          ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.FullscreenMode 2")));
-          bFullscreenExclusive = true;
+          ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.SetRes %ix%if"), DisplayMetrics.PrimaryDisplayWidth, DisplayMetrics.PrimaryDisplayHeight));
         } else {
-          ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.FullscreenMode 1")));
-          bFullscreenExclusive = false;
+          ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.SetRes %ix%iw"), ScreenResolution[0], ScreenResolution[1]));
         }
       }
     }
-    ImGui::TableNextColumn();
-
-    ImGui::TableNextColumn();
-    if (ImGui::Checkbox("VSync", &bVSync)) {
-      if (bVSync != ConsoleManager.FindConsoleVariable(TEXT("r.VSync"))->GetBool()) {
-        if (bVSync) {
-          ViewportClient->ConsoleCommand("r.VSync 1");
-        } else {
-          ViewportClient->ConsoleCommand("r.VSync 0");
-        }
-      }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Only work for Packaged Game Builds or Play Stand Alone Game.");
     }
-    ImGui::TableNextColumn();
+    bFullscreenExclusivePrev = bFullscreenExclusive;
+    ImGui::EndTable();
 
+    ImGui::BeginTable("##tblScalabilitySettingsBase", 2, ImGuiTableFlags_SizingStretchProp);
+    ImGui::TableNextRow();
     ImGui::TableNextColumn();
-    ImGui::InputInt("MaxFPS", &MaxFPS, 1, 5);
+    ImGui::Text("Window Size");
+    ImGui::TableNextColumn();
+    ImGui::InputInt2("##WindowSize", ScreenResolution);
     ImGui::SameLine();
-    ImGui::TableNextColumn();
-    if (ImGui::Button("Apply##btnVS2")) {
-      ViewportClient->ConsoleCommand(FString::Printf(TEXT("t.MaxFPS %i"), MaxFPS));
+    if (ImGui::Button("Apply##btnVS1")) {
+      ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.SetRes %ix%iw"), ScreenResolution[0], ScreenResolution[1]));
     }
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Only work for Packaged Game Builds or Play Stand Alone Game.");
+    }
+
+    ImGui::TableNextRow();
     ImGui::TableNextColumn();
-    ImGui::InputInt("ScreenPercent", &ScreenPercentage, 1, 5);
+    ImGui::Text("ScreenPercent");
+    ImGui::TableNextColumn();
+    ImGui::InputInt("##ScreenPercent", &ScreenPercentage, 1, 5);
     ImGui::SameLine();
-    ImGui::TableNextColumn();
     if (ImGui::Button("Apply##btnVS3")) {
-      ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.ScreenPercentage %i"), ScreenPercentage));
+      ConsoleManager.FindConsoleVariable(TEXT("r.ScreenPercentage"))->Set(ScreenPercentage);
     }
-    ImGui::TableNextColumn();
-    ImGui::InputInt("Res.Quality", &ResolutionQuality, 1, 5);
-    ImGui::SameLine();
-    ImGui::TableNextColumn();
-    if (ImGui::Button("Apply##btnVS4")) {
-      ViewportClient->ConsoleCommand(FString::Printf(TEXT("sg.ResolutionQuality %i"), ResolutionQuality));
-    }
-    ImGui::TableNextColumn();
-    ImGui::InputInt("ViewDistance", &ViewDistanceScale, 1, 5);
-    ImGui::SameLine();
-    ImGui::TableNextColumn();
-    if (ImGui::Button("Apply##btnVS5")) {
-      ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.ViewDistanceScale %i"), ViewDistanceScale));
-    }
-    ImGui::TableNextColumn();
-    ImGui::InputInt("PP Quality", &PostProcessQuality, 1, 5);
-    ImGui::SameLine();
-    ImGui::TableNextColumn();
-    if (ImGui::Button("Apply##btnVS6")) {
-      ViewportClient->ConsoleCommand(FString::Printf(TEXT("sg.PostProcessQuality %i"), PostProcessQuality));
-    }
-    ImGui::TableNextColumn();
-    ImGui::InputInt("Shadow Qual.", &ShadowQuality, 1, 5);
-    ImGui::SameLine();
-    ImGui::TableNextColumn();
-    if (ImGui::Button("Apply##btnVS7")) {
-      ViewportClient->ConsoleCommand(FString::Printf(TEXT("sg.ShadowQuality %i"), ShadowQuality));
-    }
-    ImGui::TableNextColumn();
-    ImGui::InputInt("Texture Qual.", &TextureQuality, 1, 5);
-    ImGui::SameLine();
-    ImGui::TableNextColumn();
-    if (ImGui::Button("Apply##btnVS8")) {
-      ViewportClient->ConsoleCommand(FString::Printf(TEXT("sg.TextureQuality %i"), TextureQuality));
-    }
-    ImGui::TableNextColumn();
-    ImGui::InputInt("Effects Qual.", &EffectsQuality, 1, 5);
-    ImGui::SameLine();
-    ImGui::TableNextColumn();
-    if (ImGui::Button("Apply##btnVS9")) {
-      ViewportClient->ConsoleCommand(FString::Printf(TEXT("sg.EffectsQuality %i"), EffectsQuality));
-    }
-    ImGui::TableNextColumn();
-    ImGui::InputInt("Detail Mode", &DetailMode, 1, 5);
-    ImGui::SameLine();
-    ImGui::TableNextColumn();
-    if (ImGui::Button("Apply##btnVS10")) {
-      ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.DetailMode %i"), DetailMode));
-    }
-    ImGui::TableNextColumn();
-    ImGui::InputInt("Skeletal LOD", &SkeletalMeshLODBias, 1, 5);
-    ImGui::SameLine();
-    ImGui::TableNextColumn();
-    if (ImGui::Button("Apply##btnVS11")) {
-      ViewportClient->ConsoleCommand(FString::Printf(TEXT("r.SkeletalMeshLODBias %i"), SkeletalMeshLODBias));
+    if (ImGui::IsItemHovered()) {
+      ImGui::SetTooltip("Only work for Packaged Game Builds or Play Stand Alone Game.");
     }
 
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("MaxFPS");
+    ImGui::TableNextColumn();
+    ImGui::InputInt("##MaxFPS", &MaxFPS, 1, 10);
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("IF Vsync is off,\nset maximum frames per second."); }
+    ImGui::SameLine();
+    if (ImGui::Button("Apply##btnVS2")) {
+      if (MaxFPS != ConsoleManager.FindConsoleVariable(TEXT("t.MaxFPS"))->GetInt()) {
+        ConsoleManager.FindConsoleVariable(TEXT("t.MaxFPS"))->Set(MaxFPS);
+      }
+    }
+
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("Res.Quality");
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Resolution Quality."); }
+    ImGui::TableNextColumn();
+    ImGui::InputInt("##ResQuality", &ResolutionQuality, 1, 5);
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("0: Low\n1: Medium\n2: High\n3: Epic\n4: Cinematic\n5: Custom"); }
+    ImGui::SameLine();
+    if (ImGui::Button("Apply##btnVS4")) {
+      if (ResolutionQuality != ConsoleManager.FindConsoleVariable(TEXT("sg.ResolutionQuality"))->GetInt()) {
+        ConsoleManager.FindConsoleVariable(TEXT("sg.ResolutionQuality"))->Set(ResolutionQuality);
+      }
+    }
+
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("View Distance");
+    ImGui::TableNextColumn();
+    ImGui::InputInt("##ViewDistance", &ViewDistanceScale, 1, 5);
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("0: Low\n1: Medium\n2: High\n3: Epic\n4: Cinematic\n5: Custom"); }
+    ImGui::SameLine();
+    if (ImGui::Button("Apply##btnVS5")) {
+      if (ViewDistanceScale != ConsoleManager.FindConsoleVariable(TEXT("r.ViewDistanceScale"))->GetInt()) {
+        ConsoleManager.FindConsoleVariable(TEXT("r.ViewDistanceScale"))->Set(ViewDistanceScale);
+      }
+    }
+
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("PP Quality");
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("PostProcess Quality."); }
+    ImGui::TableNextColumn();
+    ImGui::InputInt("##PPQuality", &PostProcessQuality, 1, 5);
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("0: Low\n1: Medium\n2: High\n3: Epic\n4: Cinematic\n5: Custom"); }
+    ImGui::SameLine();
+    if (ImGui::Button("Apply##btnVS6")) {
+      if (PostProcessQuality != ConsoleManager.FindConsoleVariable(TEXT("sg.PostProcessQuality"))->GetInt()) {
+        ConsoleManager.FindConsoleVariable(TEXT("sg.PostProcessQuality"))->Set(PostProcessQuality);
+      }
+    }
+
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("Shadow Qual.");
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Shadow Quality."); }
+    ImGui::TableNextColumn();
+    ImGui::InputInt("##ShadowQual", &ShadowQuality, 1, 5);
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("0: Low\n1: Medium\n2: High\n3: Epic\n4: Cinematic\n5: Custom"); }
+    ImGui::SameLine();
+    if (ImGui::Button("Apply##btnVS7")) {
+      if (ShadowQuality != ConsoleManager.FindConsoleVariable(TEXT("sg.ShadowQuality"))->GetInt()) {
+        ConsoleManager.FindConsoleVariable(TEXT("sg.ShadowQuality"))->Set(ShadowQuality);
+      }
+    }
+
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("Texture Qual.");
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Texture Quality."); }
+    ImGui::TableNextColumn();
+    ImGui::InputInt("##TextureQual", &TextureQuality, 1, 5);
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("0: Low\n1: Medium\n2: High\n3: Epic\n4: Cinematic\n5: Custom"); }
+    ImGui::SameLine();
+    if (ImGui::Button("Apply##btnVS8")) {
+      if (TextureQuality != ConsoleManager.FindConsoleVariable(TEXT("sg.TextureQuality"))->GetInt()) {
+        ConsoleManager.FindConsoleVariable(TEXT("sg.TextureQuality"))->Set(TextureQuality);
+      }
+    }
+
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("Effects Qual.");
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Effects Quality."); }
+    ImGui::TableNextColumn();
+    ImGui::InputInt("##EffectsQual", &EffectsQuality, 1, 5);
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("0: Low\n1: Medium\n2: High\n3: Epic\n4: Cinematic\n5: Custom"); }
+    ImGui::SameLine();
+    if (ImGui::Button("Apply##btnVS9")) {
+      if (EffectsQuality != ConsoleManager.FindConsoleVariable(TEXT("sg.EffectsQuality"))->GetInt()) {
+        ConsoleManager.FindConsoleVariable(TEXT("sg.EffectsQuality"))->Set(EffectsQuality);
+      }
+    }
+
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("Detail Mode");
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Detail Mode."); }
+    ImGui::TableNextColumn();
+    ImGui::InputInt("##DetailMode", &DetailMode, 1, 5);
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("0: Low\n1: Medium\n2: High\n3: Epic\n4: Cinematic\n5: Custom"); }
+    ImGui::SameLine();
+    if (ImGui::Button("Apply##btnVS10")) {
+      if (DetailMode != ConsoleManager.FindConsoleVariable(TEXT("r.DetailMode"))->GetInt()) {
+        ConsoleManager.FindConsoleVariable(TEXT("r.DetailMode"))->Set(DetailMode);
+      }
+    }
+
+    ImGui::TableNextRow();
+    ImGui::TableNextColumn();
+    ImGui::Text("Skeletal LOD");
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("Skeletal Level Of Detail."); }
+    ImGui::TableNextColumn();
+    ImGui::InputInt("##SkeletalLOD", &SkeletalMeshLODBias, 1, 5);
+    if (ImGui::IsItemHovered()) { ImGui::SetTooltip("0: Low\n1: Medium\n2: High\n3: Epic\n4: Cinematic\n5: Custom"); }
+    ImGui::SameLine();
+    if (ImGui::Button("Apply##btnVS11")) {
+      if (SkeletalMeshLODBias != ConsoleManager.FindConsoleVariable(TEXT("r.SkeletalMeshLODBias"))->GetInt()) {
+        ConsoleManager.FindConsoleVariable(TEXT("r.SkeletalMeshLODBias"))->Set(SkeletalMeshLODBias);
+      }
+    }
     ImGui::EndTable();
   }
 
-  if (ImGui::CollapsingHeader("Memory Stats")) {
-    FPlatformMemoryStats MemoryStats = FPlatformMemory::GetStats();
-    RenderInfoHelper(TEXT("Mem"), GetMemoryString(MemoryStats.UsedPhysical));
-    RenderInfoHelper(TEXT("MemPeak"), GetMemoryString(MemoryStats.PeakUsedPhysical));
-    RenderInfoHelper(TEXT("MemAvail"), GetMemoryString(MemoryStats.AvailablePhysical));
-    RenderInfoHelper(TEXT("MemTotal"), GetMemoryString(MemoryStats.TotalPhysical));
-    RenderInfoHelper(TEXT("VMem"), GetMemoryString(MemoryStats.UsedVirtual));
-    RenderInfoHelper(TEXT("VMemPeak"), GetMemoryString(MemoryStats.PeakUsedVirtual));
-    RenderInfoHelper(TEXT("VMemAvail"), GetMemoryString(MemoryStats.AvailableVirtual));
-    RenderInfoHelper(TEXT("VMemTotal"), GetMemoryString(MemoryStats.TotalVirtual));
-  }
-
-  if (ImGui::CollapsingHeader("Viewport Context")) {
-    ImGui::BeginDisabled();
-    RenderInfoHelper(TEXT("bIsPlayInEditorViewport"), ViewportClient->bIsPlayInEditorViewport);
-    RenderInfoHelper(TEXT("GetDPIScale"), ViewportClient->GetDPIScale());
-    RenderInfoHelper(TEXT("GetDPIDerivedResolutionFraction"), ViewportClient->GetDPIDerivedResolutionFraction());
-    RenderInfoHelper(TEXT("IsCursorVisible"), ViewportClient->Viewport->IsCursorVisible());
-    RenderInfoHelper(TEXT("IsForegroundWindow"), ViewportClient->Viewport->IsForegroundWindow());
-    RenderInfoHelper(TEXT("IsExclusiveFullscreen"), ViewportClient->Viewport->IsExclusiveFullscreen());
-    RenderInfoHelper(TEXT("IsFullscreen"), ViewportClient->Viewport->IsFullscreen());
-    RenderInfoHelper(TEXT("IsGameRenderingEnabled"), ViewportClient->Viewport->IsGameRenderingEnabled());
-    RenderInfoHelper(TEXT("IsHDRViewport"), ViewportClient->Viewport->IsHDRViewport());
-    RenderInfoHelper(TEXT("IsKeyboardAvailable"), ViewportClient->Viewport->IsKeyboardAvailable(0));
-    RenderInfoHelper(TEXT("IsMouseAvailable"), ViewportClient->Viewport->IsMouseAvailable(0));
-    RenderInfoHelper(TEXT("IsPenActive"), ViewportClient->Viewport->IsPenActive());
-    RenderInfoHelper(TEXT("IsPlayInEditorViewport"), ViewportClient->Viewport->IsPlayInEditorViewport());
-    RenderInfoHelper(TEXT("IsSlateViewport"), ViewportClient->Viewport->IsSlateViewport());
-    RenderInfoHelper(TEXT("IsSoftwareCursorVisible"), ViewportClient->Viewport->IsSoftwareCursorVisible());
-    RenderInfoHelper(TEXT("IsStereoRenderingAllowed"), ViewportClient->Viewport->IsStereoRenderingAllowed());
-    ImGui::EndDisabled();
-  }
-
-  if (ImGui::CollapsingHeader("GEngine Context")) {
-    ImGui::BeginDisabled();
-
-    RenderInfoHelper(TEXT("IsEditor"), GEngine->IsEditor());
-    RenderInfoHelper(TEXT("IsAllowedFramerateSmoothing"), GEngine->IsAllowedFramerateSmoothing());
-    RenderInfoHelper(TEXT("bForceDisableFrameRateSmoothing"), GEngine->bForceDisableFrameRateSmoothing);
-    RenderInfoHelper(TEXT("bSmoothFrameRate"), GEngine->bSmoothFrameRate);
-    RenderInfoHelper(TEXT("MinDesiredFrameRate"), GEngine->MinDesiredFrameRate);
-    RenderInfoHelper(TEXT("bUseFixedFrameRate"), GEngine->bUseFixedFrameRate);
-    RenderInfoHelper(TEXT("FixedFrameRate"), GEngine->FixedFrameRate);
-    RenderInfoHelper(TEXT("bCanBlueprintsTickByDefault"), GEngine->bCanBlueprintsTickByDefault);
-    RenderInfoHelper(TEXT("IsControllerIdUsingPlatformUserId"), GEngine->IsControllerIdUsingPlatformUserId());
-    RenderInfoHelper(TEXT("IsStereoscopic3D"), GEngine->IsStereoscopic3D(ViewportClient->Viewport));
-    RenderInfoHelper(TEXT("IsVanillaProduct"), GEngine->IsVanillaProduct());
-    RenderInfoHelper(TEXT("HasMultipleLocalPlayers"), GEngine->HasMultipleLocalPlayers(World));
-
-    RenderInfoHelper(TEXT("AreEditorAnalyticsEnabled"), GEngine->AreEditorAnalyticsEnabled());
-    RenderInfoHelper(TEXT("bAllowMultiThreadedAnimationUpdate"), GEngine->bAllowMultiThreadedAnimationUpdate);
-    RenderInfoHelper(TEXT("bDisableAILogging"), GEngine->bDisableAILogging);
-    RenderInfoHelper(TEXT("bEnableOnScreenDebugMessages"), GEngine->bEnableOnScreenDebugMessages);
-    RenderInfoHelper(TEXT("bEnableOnScreenDebugMessagesDisplay"), GEngine->bEnableOnScreenDebugMessagesDisplay);
-    RenderInfoHelper(TEXT("bEnableEditorPSysRealtimeLOD"), GEngine->bEnableEditorPSysRealtimeLOD);
-    RenderInfoHelper(TEXT("bEnableVisualLogRecordingOnStart"), GEngine->bEnableVisualLogRecordingOnStart);
-    RenderInfoHelper(TEXT("bGenerateDefaultTimecode"), GEngine->bGenerateDefaultTimecode);
-    RenderInfoHelper(TEXT("bIsInitialized"), GEngine->bIsInitialized);
-    RenderInfoHelper(TEXT("bLockReadOnlyLevels"), GEngine->bLockReadOnlyLevels);
-    RenderInfoHelper(TEXT("bOptimizeAnimBlueprintMemberVariableAccess"), GEngine->bOptimizeAnimBlueprintMemberVariableAccess);
-    RenderInfoHelper(TEXT("bPauseOnLossOfFocus"), GEngine->bPauseOnLossOfFocus);
-    RenderInfoHelper(TEXT("bRenderLightMapDensityGrayscale"), GEngine->bRenderLightMapDensityGrayscale);
-    RenderInfoHelper(TEXT("bShouldGenerateLowQualityLightmaps_DEPRECATED"), GEngine->bShouldGenerateLowQualityLightmaps_DEPRECATED);
-    RenderInfoHelper(TEXT("BSPSelectionHighlightIntensity"), GEngine->BSPSelectionHighlightIntensity);
-    RenderInfoHelper(TEXT("bStartedLoadMapMovie"), GEngine->bStartedLoadMapMovie);
-    RenderInfoHelper(TEXT("bSubtitlesEnabled"), GEngine->bSubtitlesEnabled);
-    RenderInfoHelper(TEXT("bSubtitlesForcedOff"), GEngine->bSubtitlesForcedOff);
-    RenderInfoHelper(TEXT("bSuppressMapWarnings"), GEngine->bSuppressMapWarnings);
-    RenderInfoHelper(TEXT("DisplayGamma"), GEngine->DisplayGamma);
-    RenderInfoHelper(TEXT("IsAutosaving"), GEngine->IsAutosaving());
-    RenderInfoHelper(TEXT("MaximumLoopIterationCount"), GEngine->MaximumLoopIterationCount);
-    RenderInfoHelper(TEXT("MaxLightMapDensity"), GEngine->MaxLightMapDensity);
-    RenderInfoHelper(TEXT("MaxOcclusionPixelsFraction"), GEngine->MaxOcclusionPixelsFraction);
-    RenderInfoHelper(TEXT("MaxParticleResize"), GEngine->MaxParticleResize);
-    RenderInfoHelper(TEXT("MaxParticleResizeWarn"), GEngine->MaxParticleResizeWarn);
-    RenderInfoHelper(TEXT("MaxPixelShaderAdditiveComplexityCount"), GEngine->MaxPixelShaderAdditiveComplexityCount);
-    RenderInfoHelper(TEXT("UseSkeletalMeshMinLODPerQualityLevels"), GEngine->UseSkeletalMeshMinLODPerQualityLevels);
-    RenderInfoHelper(TEXT("UseStaticMeshMinLODPerQualityLevels"), GEngine->UseStaticMeshMinLODPerQualityLevels);
-
-    ImGui::EndDisabled();
-  }
-
-  if (ImGui::CollapsingHeader("RHI Context")) {
-    ImGui::BeginDisabled();
-
-    RenderInfoHelper(TEXT("GRHIAdapterDriverDate"), GRHIAdapterDriverDate);
-    RenderInfoHelper(TEXT("GRHIAdapterDriverOnDenyList"), GRHIAdapterDriverOnDenyList);
-    RenderInfoHelper(TEXT("GRHIAdapterInternalDriverVersion"), GRHIAdapterInternalDriverVersion);
-    RenderInfoHelper(TEXT("GRHIAdapterName"), GRHIAdapterName);
-    RenderInfoHelper(TEXT("GRHIAdapterUserDriverVersion"), GRHIAdapterUserDriverVersion);
-    RenderInfoHelper(TEXT("GRHIAttachmentVariableRateShadingEnabled"), GRHISupportsAttachmentVariableRateShading);
-    RenderInfoHelper(TEXT("GRHIDeviceId"), GRHIDeviceId);
-    RenderInfoHelper(TEXT("GRHIDeviceIsAMDPreGCNArchitecture"), GRHIDeviceIsAMDPreGCNArchitecture);
-    RenderInfoHelper(TEXT("GRHIDeviceIsIntegrated"), GRHIDeviceIsIntegrated);
-    RenderInfoHelper(TEXT("GRHIDeviceRevision"), GRHIDeviceRevision);
-    RenderInfoHelper(TEXT("GRHIForceNoDeletionLatencyForStreamingTextures"), GRHIForceNoDeletionLatencyForStreamingTextures);
-    RenderInfoHelper(TEXT("GRHIIsHDREnabled"), GRHIIsHDREnabled);
-    RenderInfoHelper(TEXT("GRHILazyShaderCodeLoading"), GRHILazyShaderCodeLoading);
-    RenderInfoHelper(TEXT("GRHIMinimumWaveSize"), GRHIMinimumWaveSize);
-    RenderInfoHelper(TEXT("GRHIMaximumWaveSize"), GRHIMaximumWaveSize);
-    RenderInfoHelper(TEXT("GRHINeedsExtraDeletionLatency"), GRHINeedsExtraDeletionLatency);
-    RenderInfoHelper(TEXT("GRHINeedsUnatlasedCSMDepthsWorkaround"), GRHINeedsUnatlasedCSMDepthsWorkaround);
-    RenderInfoHelper(TEXT("GRHIPersistentThreadGroupCount"), GRHIPersistentThreadGroupCount);
-    RenderInfoHelper(TEXT("GRHIPresentCounter"), GRHIPresentCounter);
-    RenderInfoHelper(TEXT("GRHIRayTracingAccelerationStructureAlignment"), GRHIRayTracingAccelerationStructureAlignment);
-    RenderInfoHelper(TEXT("GRHIRayTracingScratchBufferAlignment"), GRHIRayTracingScratchBufferAlignment);
-    RenderInfoHelper(TEXT("GRHIRequiresRenderTargetForPixelShaderUAVs"), GRHIRequiresRenderTargetForPixelShaderUAVs);
-    RenderInfoHelper(TEXT("GRHISupportsArrayIndexFromAnyShader"), GRHISupportsArrayIndexFromAnyShader);
-    RenderInfoHelper(TEXT("GRHISupportsAsyncPipelinePrecompile"), GRHISupportsAsyncPipelinePrecompile);
-    RenderInfoHelper(TEXT("GRHISupportsAsyncTextureCreation"), GRHISupportsAsyncTextureCreation);
-    RenderInfoHelper(TEXT("GRHISupportsAtomicUInt64"), GRHISupportsAtomicUInt64);
-    RenderInfoHelper(TEXT("GRHISupportsAttachmentVariableRateShading"), GRHISupportsAttachmentVariableRateShading);
-    RenderInfoHelper(TEXT("GRHISupportsBackBufferWithCustomDepthStencil"), GRHISupportsBackBufferWithCustomDepthStencil);
-    RenderInfoHelper(TEXT("GRHISupportsBaseVertexIndex"), GRHISupportsBaseVertexIndex);
-    RenderInfoHelper(TEXT("GRHISupportsComplexVariableRateShadingCombinerOps"), GRHISupportsComplexVariableRateShadingCombinerOps);
-    RenderInfoHelper(TEXT("GRHISupportsConservativeRasterization"), GRHISupportsConservativeRasterization);
-    RenderInfoHelper(TEXT("GRHISupportsDepthUAV"), GRHISupportsDepthUAV);
-    RenderInfoHelper(TEXT("GRHISupportsDirectGPUMemoryLock"), GRHISupportsDirectGPUMemoryLock);
-    RenderInfoHelper(TEXT("GRHISupportsDrawIndirect"), GRHISupportsDrawIndirect);
-    RenderInfoHelper(TEXT("GRHISupportsDX12AtomicUInt64"), GRHISupportsDX12AtomicUInt64);
-    RenderInfoHelper(TEXT("GRHISupportsDynamicResolution"), GRHISupportsDynamicResolution);
-    RenderInfoHelper(TEXT("GRHISupportsEfficientUploadOnResourceCreation"), GRHISupportsEfficientUploadOnResourceCreation);
-    RenderInfoHelper(TEXT("GRHISupportsExactOcclusionQueries"), GRHISupportsExactOcclusionQueries);
-    RenderInfoHelper(TEXT("GRHISupportsExplicitFMask"), GRHISupportsExplicitFMask);
-    RenderInfoHelper(TEXT("GRHISupportsExplicitHTile"), GRHISupportsExplicitHTile);
-    RenderInfoHelper(TEXT("GRHISupportsFirstInstance"), GRHISupportsFirstInstance);
-    RenderInfoHelper(TEXT("GRHISupportsFrameCyclesBubblesRemoval"), GRHISupportsFrameCyclesBubblesRemoval);
-    RenderInfoHelper(TEXT("GRHISupportsGPUTimestampBubblesRemoval"), GRHISupportsGPUTimestampBubblesRemoval);
-    RenderInfoHelper(TEXT("GRHISupportsHDROutput"), GRHISupportsHDROutput);
-    RenderInfoHelper(TEXT("GRHISupportsInlineRayTracing"), GRHISupportsInlineRayTracing);
-    RenderInfoHelper(TEXT("GRHISupportsLargerVariableRateShadingSizes"), GRHISupportsLargerVariableRateShadingSizes);
-    RenderInfoHelper(TEXT("GRHISupportsLateVariableRateShadingUpdate"), GRHISupportsLateVariableRateShadingUpdate);
-    RenderInfoHelper(TEXT("GRHISupportsLazyShaderCodeLoading"), GRHISupportsLazyShaderCodeLoading);
-    RenderInfoHelper(TEXT("GRHISupportsMapWriteNoOverwrite"), GRHISupportsMapWriteNoOverwrite);
-    RenderInfoHelper(TEXT("GRHISupportsMeshShadersTier0"), GRHISupportsMeshShadersTier0);
-    RenderInfoHelper(TEXT("GRHISupportsMeshShadersTier1"), GRHISupportsMeshShadersTier1);
-    RenderInfoHelper(TEXT("GRHISupportsMSAADepthSampleAccess"), GRHISupportsMSAADepthSampleAccess);
-    RenderInfoHelper(TEXT("GRHISupportsMultithreadedResources"), GRHISupportsMultithreadedResources);
-    RenderInfoHelper(TEXT("GRHISupportsMultithreadedShaderCreation"), GRHISupportsMultithreadedShaderCreation);
-    RenderInfoHelper(TEXT("GRHISupportsMultithreading"), GRHISupportsMultithreading);
-    RenderInfoHelper(TEXT("GRHISupportsParallelRHIExecute"), GRHISupportsParallelRHIExecute);
-    RenderInfoHelper(TEXT("GRHISupportsPipelineFileCache"), GRHISupportsPipelineFileCache);
-    RenderInfoHelper(TEXT("GRHISupportsPipelineStateSortKey"), GRHISupportsPipelineStateSortKey);
-    RenderInfoHelper(TEXT("GRHISupportsPipelineVariableRateShading"), GRHISupportsPipelineVariableRateShading);
-    RenderInfoHelper(TEXT("GRHISupportsPixelShaderUAVs"), GRHISupportsPixelShaderUAVs);
-    RenderInfoHelper(TEXT("GRHISupportsPrimitiveShaders"), GRHISupportsPrimitiveShaders);
-    RenderInfoHelper(TEXT("GRHISupportsQuadTopology"), GRHISupportsQuadTopology);
-    RenderInfoHelper(TEXT("GRHISupportsRawViewsForAnyBuffer"), GRHISupportsRawViewsForAnyBuffer);
-    RenderInfoHelper(TEXT("GRHISupportsRayTracing"), GRHISupportsRayTracing);
-    RenderInfoHelper(TEXT("GRHISupportsRayTracingAMDHitToken"), GRHISupportsRayTracingAMDHitToken);
-    RenderInfoHelper(TEXT("GRHISupportsRayTracingAsyncBuildAccelerationStructure"), GRHISupportsRayTracingAsyncBuildAccelerationStructure);
-    RenderInfoHelper(TEXT("GRHISupportsRayTracingDispatchIndirect"), GRHISupportsRayTracingDispatchIndirect);
-    RenderInfoHelper(TEXT("GRHISupportsRayTracingPSOAdditions"), GRHISupportsRayTracingPSOAdditions);
-    RenderInfoHelper(TEXT("GRHISupportsRayTracingShaders"), GRHISupportsRayTracingShaders);
-    RenderInfoHelper(TEXT("GRHISupportsRectTopology"), GRHISupportsRectTopology);
-    RenderInfoHelper(TEXT("GRHISupportsResummarizeHTile"), GRHISupportsResummarizeHTile);
-    RenderInfoHelper(TEXT("GRHISupportsRHIOnTaskThread"), GRHISupportsRHIOnTaskThread);
-    RenderInfoHelper(TEXT("GRHISupportsRHIThread"), GRHISupportsRHIThread);
-    RenderInfoHelper(TEXT("GRHISupportsRWTextureBuffers"), GRHISupportsRWTextureBuffers);
-    RenderInfoHelper(TEXT("GRHISupportsSeparateDepthStencilCopyAccess"), GRHISupportsSeparateDepthStencilCopyAccess);
-    RenderInfoHelper(TEXT("GRHISupportsShaderTimestamp"), GRHISupportsShaderTimestamp);
-    RenderInfoHelper(TEXT("GRHISupportsStencilRefFromPixelShader"), GRHISupportsStencilRefFromPixelShader);
-    RenderInfoHelper(TEXT("GRHISupportsTextureStreaming"), GRHISupportsTextureStreaming);
-    RenderInfoHelper(TEXT("GRHISupportsUAVFormatAliasing"), GRHISupportsUAVFormatAliasing);
-    RenderInfoHelper(TEXT("GRHISupportsUpdateFromBufferTexture"), GRHISupportsUpdateFromBufferTexture);
-    RenderInfoHelper(TEXT("GRHISupportsVariableRateShadingAttachmentArrayTextures"), GRHISupportsVariableRateShadingAttachmentArrayTextures);
-    RenderInfoHelper(TEXT("GRHISupportsWaveOperations"), GRHISupportsWaveOperations);
-    RenderInfoHelper(TEXT("GRHIThreadNeedsKicking"), GRHIThreadNeedsKicking);
-    RenderInfoHelper(TEXT("GRHIThreadTime"), GRHIThreadTime);
-    RenderInfoHelper(TEXT("GRHIValidationEnabled"), GRHIValidationEnabled);
-    //RenderInfoHelper(TEXT("GRHIVariableRateShadingEnabled"), GVRSImageManager.IsAttachmentVRSEnabled());
-    RenderInfoHelper(TEXT("GRHIVendorId"), GRHIVendorId);
-
-    ImGui::EndDisabled();
-  }
-
-  if (ImGui::CollapsingHeader("Platform Context")) {
-    ImGui::BeginDisabled();
-    RenderInfoHelper(TEXT("AllowAudioThread"), FGenericPlatformMisc::AllowAudioThread());
-    RenderInfoHelper(TEXT("AllowLocalCaching"), FGenericPlatformMisc::AllowLocalCaching());
-    RenderInfoHelper(TEXT("AllowThreadHeartBeat"), FGenericPlatformMisc::AllowThreadHeartBeat());
-    RenderInfoHelper(TEXT("CloudDir"), FGenericPlatformMisc::CloudDir());
-    RenderInfoHelper(TEXT("DesktopTouchScreen"), FGenericPlatformMisc::DesktopTouchScreen());
-    RenderInfoHelper(TEXT("EngineDir"), FGenericPlatformMisc::EngineDir());
-    RenderInfoHelper(TEXT("FullscreenSameAsWindowedFullscreen"), FGenericPlatformMisc::FullscreenSameAsWindowedFullscreen());
-    RenderInfoHelper(TEXT("GamePersistentDownloadDir"), FGenericPlatformMisc::GamePersistentDownloadDir());
-    RenderInfoHelper(TEXT("GameTemporaryDownloadDir"), FGenericPlatformMisc::GameTemporaryDownloadDir());
-    RenderInfoHelper(TEXT("GetBatteryLevel"), FGenericPlatformMisc::GetBatteryLevel());
-    RenderInfoHelper(TEXT("GetBrightness"), FGenericPlatformMisc::GetBrightness());
-    RenderInfoHelper(TEXT("GetCPUBrand"), FGenericPlatformMisc::GetCPUBrand());
-    RenderInfoHelper(TEXT("GetCPUChipset"), FGenericPlatformMisc::GetCPUChipset());
-    RenderInfoHelper(TEXT("GetCPUInfo"), FGenericPlatformMisc::GetCPUInfo());
-    RenderInfoHelper(TEXT("GetCPUVendor"), FGenericPlatformMisc::GetCPUVendor());
-    RenderInfoHelper(TEXT("GetDefaultDeviceProfileName"), FGenericPlatformMisc::GetDefaultDeviceProfileName());
-    RenderInfoHelper(TEXT("GetDefaultLanguage"), FGenericPlatformMisc::GetDefaultLanguage());
-    RenderInfoHelper(TEXT("GetDefaultLocale"), FGenericPlatformMisc::GetDefaultLocale());
-    RenderInfoHelper(TEXT("GetDefaultPathSeparator"), FGenericPlatformMisc::GetDefaultPathSeparator());
-    RenderInfoHelper(TEXT("GetDeviceId"), FGenericPlatformMisc::GetDeviceId());
-    RenderInfoHelper(TEXT("GetDeviceMakeAndModel"), FGenericPlatformMisc::GetDeviceMakeAndModel());
-    RenderInfoHelper(TEXT("GetDeviceTemperatureLevel"), FGenericPlatformMisc::GetDeviceTemperatureLevel());
-    RenderInfoHelper(TEXT("GetDeviceVolume"), FGenericPlatformMisc::GetDeviceVolume());
-    RenderInfoHelper(TEXT("GetEngineMode"), FGenericPlatformMisc::GetEngineMode());
-    RenderInfoHelper(TEXT("GetEpicAccountId"), FGenericPlatformMisc::GetEpicAccountId());
-    RenderInfoHelper(TEXT("GetFileManagerName"), FGenericPlatformMisc::GetFileManagerName());
-    RenderInfoHelper(TEXT("GetLastError"), FGenericPlatformMisc::GetLastError());
-    RenderInfoHelper(TEXT("GetLocalCurrencyCode"), FGenericPlatformMisc::GetLocalCurrencyCode());
-    RenderInfoHelper(TEXT("GetLocalCurrencySymbol"), FGenericPlatformMisc::GetLocalCurrencySymbol());
-    RenderInfoHelper(TEXT("GetLoginId"), FGenericPlatformMisc::GetLoginId());
-    RenderInfoHelper(TEXT("GetMaxPathLength"), FGenericPlatformMisc::GetMaxPathLength());
-    RenderInfoHelper(TEXT("GetMaxRefreshRate"), FGenericPlatformMisc::GetMaxRefreshRate());
-    RenderInfoHelper(TEXT("GetMaxSupportedRefreshRate"), FGenericPlatformMisc::GetMaxSupportedRefreshRate());
-    RenderInfoHelper(TEXT("GetMaxSyncInterval"), FGenericPlatformMisc::GetMaxSyncInterval());
-    RenderInfoHelper(TEXT("GetMobilePropagateAlphaSetting"), FGenericPlatformMisc::GetMobilePropagateAlphaSetting());
-    RenderInfoHelper(TEXT("GetNullRHIShaderFormat"), FGenericPlatformMisc::GetNullRHIShaderFormat());
-    RenderInfoHelper(TEXT("GetOperatingSystemId"), FGenericPlatformMisc::GetOperatingSystemId());
-    RenderInfoHelper(TEXT("GetOSVersion"), FGenericPlatformMisc::GetOSVersion());
-    RenderInfoHelper(TEXT("GetPathVarDelimiter"), FGenericPlatformMisc::GetPathVarDelimiter());
-    RenderInfoHelper(TEXT("GetPlatformFeaturesModuleName"), FGenericPlatformMisc::GetPlatformFeaturesModuleName());
-    RenderInfoHelper(TEXT("GetPrimaryGPUBrand"), FGenericPlatformMisc::GetPrimaryGPUBrand());
-    RenderInfoHelper(TEXT("GetTimeZoneId"), FGenericPlatformMisc::GetTimeZoneId());
-    RenderInfoHelper(TEXT("GetUBTPlatform"), FGenericPlatformMisc::GetUBTPlatform());
-    RenderInfoHelper(TEXT("GetUniqueAdvertisingId"), FGenericPlatformMisc::GetUniqueAdvertisingId());
-    RenderInfoHelper(TEXT("GetUseVirtualJoysticks"), FGenericPlatformMisc::GetUseVirtualJoysticks());
-    RenderInfoHelper(TEXT("GetVolumeButtonsHandledBySystem"), FGenericPlatformMisc::GetVolumeButtonsHandledBySystem());
-    RenderInfoHelper(TEXT("HasActiveWiFiConnection"), FGenericPlatformMisc::HasActiveWiFiConnection());
-    RenderInfoHelper(TEXT("HasMemoryWarningHandler"), FGenericPlatformMisc::HasMemoryWarningHandler());
-    RenderInfoHelper(TEXT("HasNonoptionalCPUFeatures"), FGenericPlatformMisc::HasNonoptionalCPUFeatures());
-    RenderInfoHelper(TEXT("HasProjectPersistentDownloadDir"), FGenericPlatformMisc::HasProjectPersistentDownloadDir());
-    RenderInfoHelper(TEXT("HasSeparateChannelForDebugOutput"), FGenericPlatformMisc::HasSeparateChannelForDebugOutput());
-    RenderInfoHelper(TEXT("HasVariableHardware"), FGenericPlatformMisc::HasVariableHardware());
-    RenderInfoHelper(TEXT("Is64bitOperatingSystem"), FGenericPlatformMisc::Is64bitOperatingSystem());
-    RenderInfoHelper(TEXT("IsDebuggerPresent"), FGenericPlatformMisc::IsDebuggerPresent());
-    RenderInfoHelper(TEXT("IsEnsureAllowed"), FGenericPlatformMisc::IsEnsureAllowed());
-    RenderInfoHelper(TEXT("IsInLowPowerMode"), FGenericPlatformMisc::IsInLowPowerMode());
-    RenderInfoHelper(TEXT("IsLocalPrintThreadSafe"), FGenericPlatformMisc::IsLocalPrintThreadSafe());
-    RenderInfoHelper(TEXT("IsPackagedForDistribution"), FGenericPlatformMisc::IsPackagedForDistribution());
-    RenderInfoHelper(TEXT("IsPGOEnabled"), FGenericPlatformMisc::IsPGOEnabled());
-    RenderInfoHelper(TEXT("IsRegisteredForRemoteNotifications"), FGenericPlatformMisc::IsRegisteredForRemoteNotifications());
-    RenderInfoHelper(TEXT("IsRemoteSession"), FGenericPlatformMisc::IsRemoteSession());
-    RenderInfoHelper(TEXT("IsRunningInCloud"), FGenericPlatformMisc::IsRunningInCloud());
-    RenderInfoHelper(TEXT("IsRunningOnBattery"), FGenericPlatformMisc::IsRunningOnBattery());
-    RenderInfoHelper(TEXT("LaunchDir"), FGenericPlatformMisc::LaunchDir());
-    RenderInfoHelper(TEXT("NeedsNonoptionalCPUFeaturesCheck"), FGenericPlatformMisc::NeedsNonoptionalCPUFeaturesCheck());
-    RenderInfoHelper(TEXT("NumberOfCores"), FGenericPlatformMisc::NumberOfCores());
-    RenderInfoHelper(TEXT("NumberOfCoresIncludingHyperthreads"), FGenericPlatformMisc::NumberOfCoresIncludingHyperthreads());
-    RenderInfoHelper(TEXT("NumberOfIOWorkerThreadsToSpawn"), FGenericPlatformMisc::NumberOfIOWorkerThreadsToSpawn());
-    RenderInfoHelper(TEXT("NumberOfWorkerThreadsToSpawn"), FGenericPlatformMisc::NumberOfWorkerThreadsToSpawn());
-    RenderInfoHelper(TEXT("ProjectDir"), FGenericPlatformMisc::ProjectDir());
-    RenderInfoHelper(TEXT("SupportsBackbufferSampling"), FGenericPlatformMisc::SupportsBackbufferSampling());
-    RenderInfoHelper(TEXT("SupportsBrightness"), FGenericPlatformMisc::SupportsBrightness());
-    RenderInfoHelper(TEXT("SupportsDeviceCheckToken"), FGenericPlatformMisc::SupportsDeviceCheckToken());
-    RenderInfoHelper(TEXT("SupportsForceTouchInput"), FGenericPlatformMisc::SupportsForceTouchInput());
-    RenderInfoHelper(TEXT("SupportsFullCrashDumps"), FGenericPlatformMisc::SupportsFullCrashDumps());
-    RenderInfoHelper(TEXT("SupportsLocalCaching"), FGenericPlatformMisc::SupportsLocalCaching());
-    RenderInfoHelper(TEXT("SupportsMessaging"), FGenericPlatformMisc::SupportsMessaging());
-    RenderInfoHelper(TEXT("SupportsMultithreadedFileHandles"), FGenericPlatformMisc::SupportsMultithreadedFileHandles());
-    RenderInfoHelper(TEXT("SupportsTouchInput"), FGenericPlatformMisc::SupportsTouchInput());
-    RenderInfoHelper(TEXT("UseHDRByDefault"), FGenericPlatformMisc::UseHDRByDefault());
-    RenderInfoHelper(TEXT("UseRenderThread"), FGenericPlatformMisc::UseRenderThread());
-    ImGui::EndDisabled();
-  }
+  RenderEngineTab_Data();
+  // Platform specific context.
 }
 
 void FDFX_StatData::RenderShadersTab() {
@@ -826,14 +664,14 @@ void FDFX_StatData::RenderStatTab() {
 }
 
 void FDFX_StatData::RenderSettingsTab() {
-  if (ThreadPlotConfig.HistoryDuration > GlobalStatHistoryDuration) {
-    ThreadPlotConfig.HistoryDuration = GlobalStatHistoryDuration;
+  if (PlotConfigThreads.HistoryDuration > GlobalStatHistoryDuration) {
+    PlotConfigThreads.HistoryDuration = GlobalStatHistoryDuration;
   }
-  if (FramePlotConfig.HistoryDuration > GlobalStatHistoryDuration) {
-    FramePlotConfig.HistoryDuration = GlobalStatHistoryDuration;
+  if (PlotConfigFramerate.HistoryDuration > GlobalStatHistoryDuration) {
+    PlotConfigFramerate.HistoryDuration = GlobalStatHistoryDuration;
   }
-  if (FPSPlotConfig.HistoryDuration > GlobalStatHistoryDuration) {
-    FPSPlotConfig.HistoryDuration = GlobalStatHistoryDuration;
+  if (PlotConfigFrametime.HistoryDuration > GlobalStatHistoryDuration) {
+    PlotConfigFrametime.HistoryDuration = GlobalStatHistoryDuration;
   }
 
   if (ImGui::CollapsingHeader("Graphs")) {
@@ -846,20 +684,20 @@ void FDFX_StatData::RenderSettingsTab() {
     if (bShowPlots) {
       ImGui::Indent();
       if (ImGui::CollapsingHeader("Threads")) {
-        ImGui::Checkbox("Display Threads", &ThreadPlotConfig.bVisible);
+        ImGui::Checkbox("Display Threads", &PlotConfigThreads.bVisible);
         ImGui::Checkbox("Sort plot order", &bSortPlots);
         ImGui::SameLine();
         RenderHelpMarker("Sort graphs order to display better colors but can cause flickering if two threads have similar values.");
-        ImGui::SliderFloat("History##1", &ThreadPlotConfig.HistoryDuration, 0.1f, GlobalStatHistoryDuration, "%.1f s");
-        ImGui::SliderFloat("Position X##1", &ThreadPlotConfig.Position.x, 0.0f, ViewportSize.X - 1.0f, "%.0f px");
-        ImGui::SliderFloat("Position Y##1", &ThreadPlotConfig.Position.y, 0.0f, ViewportSize.Y - 1.0f, "%.0f px");
-        ImGui::SliderFloat("Size X##1", &ThreadPlotConfig.Size.x, 0.0f, ViewportSize.X - 1.0f, "%.0f px");
-        ImGui::SliderFloat("Size Y##1", &ThreadPlotConfig.Size.y, 0.0f, ViewportSize.Y - 1.0f, "%.0f px");
-        ImGui::SliderFloat("Range Min##1", &ThreadPlotConfig.Range.x, 0.1f, 60.0f, "%.3f ms");
-        ImGui::SliderFloat("Range Max##1", &ThreadPlotConfig.Range.y, 0.1f, 60.0f, "%.3f ms");
-        ImGui::ColorEdit4("Background##1", &ThreadPlotConfig.BackgroundColor.x);
-        ImGui::SliderFloat("Plot Alpha##1", &ThreadPlotConfig.FillAlpha, 0.0f, 1.0f, "%.2f");
-        ImGui::ColorEdit4("Plot Background##1", &ThreadPlotConfig.PlotBackgroundColor.x);
+        ImGui::SliderFloat("History##1", &PlotConfigThreads.HistoryDuration, 0.1f, GlobalStatHistoryDuration, "%.1f s");
+        ImGui::SliderFloat("Position X##1", &PlotConfigThreads.Position.x, 0.0f, ViewportSize.X - 1.0f, "%.0f px");
+        ImGui::SliderFloat("Position Y##1", &PlotConfigThreads.Position.y, 0.0f, ViewportSize.Y - 1.0f, "%.0f px");
+        ImGui::SliderFloat("Size X##1", &PlotConfigThreads.Size.x, 0.0f, ViewportSize.X - 1.0f, "%.0f px");
+        ImGui::SliderFloat("Size Y##1", &PlotConfigThreads.Size.y, 0.0f, ViewportSize.Y - 1.0f, "%.0f px");
+        ImGui::SliderFloat("Range Min##1", &PlotConfigThreads.Range.x, 0.1f, 60.0f, "%.3f ms");
+        ImGui::SliderFloat("Range Max##1", &PlotConfigThreads.Range.y, 0.1f, 60.0f, "%.3f ms");
+        ImGui::ColorEdit4("Background##1", &PlotConfigThreads.BackgroundColor.x);
+        ImGui::SliderFloat("Plot Alpha##1", &PlotConfigThreads.FillAlpha, 0.0f, 1.0f, "%.2f");
+        ImGui::ColorEdit4("Plot Background##1", &PlotConfigThreads.PlotBackgroundColor.x);
         if (ImGui::CollapsingHeader("Game##01")) {
           ImGui::Checkbox("Display Game##01", &ThreadPlotStyles[0].bShowFramePlot);
           ImGui::ColorEdit4("Plot Line##01", &ThreadPlotStyles[0].LineColor.x);
@@ -895,42 +733,42 @@ void FDFX_StatData::RenderSettingsTab() {
           ImGui::ColorEdit4("Plot Line##61", &ThreadPlotStyles[6].LineColor.x);
           ImGui::ColorEdit4("Plot Shade##61", &ThreadPlotStyles[6].ShadeColor.x);
         }
-        ImGui::SliderFloat("Marker Line##1", &ThreadPlotConfig.MarkerLineWidth, 1.0f, 144.0f, "%.3f");
-        ImGui::SliderFloat("Marker Thickness##1", &ThreadPlotConfig.MarkerThickness, 1.0f, 10.0f, "%.0f");
+        ImGui::SliderFloat("Marker Line##1", &PlotConfigThreads.MarkerLineWidth, 1.0f, 144.0f, "%.3f");
+        ImGui::SliderFloat("Marker Thickness##1", &PlotConfigThreads.MarkerThickness, 1.0f, 10.0f, "%.0f");
       }
       if (ImGui::CollapsingHeader("Frame")) {
-        ImGui::Checkbox("Display Frame", &FramePlotConfig.bVisible);
-        ImGui::SliderFloat("History##2", &FramePlotConfig.HistoryDuration, 0.1f, GlobalStatHistoryDuration, "%.1f s");
-        ImGui::SliderFloat("Position X##2", &FramePlotConfig.Position.x, 0.0f, ViewportSize.X - 1.0f, "%.0f px");
-        ImGui::SliderFloat("Position Y##2", &FramePlotConfig.Position.y, 0.0f, ViewportSize.Y - 1.0f, "%.0f px");
-        ImGui::SliderFloat("Size X##2", &FramePlotConfig.Size.x, 0.0f, ViewportSize.X - 1.0f, "%.0f px");
-        ImGui::SliderFloat("Size Y##2", &FramePlotConfig.Size.y, 0.0f, ViewportSize.Y - 1.0f, "%.0f px");
-        ImGui::SliderFloat("Range Min##2", &FramePlotConfig.Range.x, 0.1f, 60.0f, "%.3f ms");
-        ImGui::SliderFloat("Range Max##2", &FramePlotConfig.Range.y, 0.1f, 60.0f, "%.3f ms");
-        ImGui::ColorEdit4("Background##2", &FramePlotConfig.BackgroundColor.x);
-        ImGui::SliderFloat("Plot Alpha##2", &FramePlotConfig.FillAlpha, 0.0f, 1.0f, "%.2f");
-        ImGui::ColorEdit4("Plot Background##2", &FramePlotConfig.PlotBackgroundColor.x);
-        ImGui::ColorEdit4("Plot Line##2", &FramePlotConfig.LineColor.x);
-        ImGui::ColorEdit4("Plot Shade##2", &FramePlotConfig.ShadeColor.x);
-        ImGui::SliderFloat("Marker Line##2", &FramePlotConfig.MarkerLineWidth, 1.0f, 144.0f, "%.3f");
-        ImGui::SliderFloat("Marker Thickness##2", &FramePlotConfig.MarkerThickness, 1.0f, 10.0f, "%.0f");
+        ImGui::Checkbox("Display Frame", &PlotConfigFramerate.bVisible);
+        ImGui::SliderFloat("History##2", &PlotConfigFramerate.HistoryDuration, 0.1f, GlobalStatHistoryDuration, "%.1f s");
+        ImGui::SliderFloat("Position X##2", &PlotConfigFramerate.Position.x, 0.0f, ViewportSize.X - 1.0f, "%.0f px");
+        ImGui::SliderFloat("Position Y##2", &PlotConfigFramerate.Position.y, 0.0f, ViewportSize.Y - 1.0f, "%.0f px");
+        ImGui::SliderFloat("Size X##2", &PlotConfigFramerate.Size.x, 0.0f, ViewportSize.X - 1.0f, "%.0f px");
+        ImGui::SliderFloat("Size Y##2", &PlotConfigFramerate.Size.y, 0.0f, ViewportSize.Y - 1.0f, "%.0f px");
+        ImGui::SliderFloat("Range Min##2", &PlotConfigFramerate.Range.x, 0.1f, 60.0f, "%.3f ms");
+        ImGui::SliderFloat("Range Max##2", &PlotConfigFramerate.Range.y, 0.1f, 60.0f, "%.3f ms");
+        ImGui::ColorEdit4("Background##2", &PlotConfigFramerate.BackgroundColor.x);
+        ImGui::SliderFloat("Plot Alpha##2", &PlotConfigFramerate.FillAlpha, 0.0f, 1.0f, "%.2f");
+        ImGui::ColorEdit4("Plot Background##2", &PlotConfigFramerate.PlotBackgroundColor.x);
+        ImGui::ColorEdit4("Plot Line##2", &PlotConfigFramerate.LineColor.x);
+        ImGui::ColorEdit4("Plot Shade##2", &PlotConfigFramerate.ShadeColor.x);
+        ImGui::SliderFloat("Marker Line##2", &PlotConfigFramerate.MarkerLineWidth, 1.0f, 144.0f, "%.3f");
+        ImGui::SliderFloat("Marker Thickness##2", &PlotConfigFramerate.MarkerThickness, 1.0f, 10.0f, "%.0f");
       }
       if (ImGui::CollapsingHeader("FPS")) {
-        ImGui::Checkbox("Display FPS", &FPSPlotConfig.bVisible);
-        ImGui::SliderFloat("History##3", &FPSPlotConfig.HistoryDuration, 0.1f, GlobalStatHistoryDuration, "%.1f s");
-        ImGui::SliderFloat("Position X##3", &FPSPlotConfig.Position.x, 0.0f, ViewportSize.X - 1.0f, "%.0f px");
-        ImGui::SliderFloat("Position Y##3", &FPSPlotConfig.Position.y, 0.0f, ViewportSize.Y - 1.0f, "%.0f px");
-        ImGui::SliderFloat("Size X##3", &FPSPlotConfig.Size.x, 0.0f, ViewportSize.X - 1.0f, "%.0f px");
-        ImGui::SliderFloat("Size Y##3", &FPSPlotConfig.Size.y, 0.0f, ViewportSize.Y - 1.0f, "%.0f px");
-        ImGui::SliderFloat("Range Min##3", &FPSPlotConfig.Range.x, 0.1f, 220.0f, "%.3f ms");
-        ImGui::SliderFloat("Range Max##3", &FPSPlotConfig.Range.y, 0.1f, 240.0f, "%.3f ms");
-        ImGui::ColorEdit4("Background##3", &FPSPlotConfig.BackgroundColor.x);
-        ImGui::SliderFloat("Plot Alpha##3", &FPSPlotConfig.FillAlpha, 0.0f, 1.0f, "%.2f");
-        ImGui::ColorEdit4("Plot Background##3", &FPSPlotConfig.PlotBackgroundColor.x);
-        ImGui::ColorEdit4("Plot Line##3", &FPSPlotConfig.LineColor.x);
-        ImGui::ColorEdit4("Plot Shade##3", &FPSPlotConfig.ShadeColor.x);
-        ImGui::SliderFloat("Marker Line##3", &FPSPlotConfig.MarkerLineWidth, 1.0f, 144.0f, "%.3f");
-        ImGui::SliderFloat("Marker Thickness##3", &FPSPlotConfig.MarkerThickness, 1.0f, 10.0f, "%.0f");
+        ImGui::Checkbox("Display FPS", &PlotConfigFrametime.bVisible);
+        ImGui::SliderFloat("History##3", &PlotConfigFrametime.HistoryDuration, 0.1f, GlobalStatHistoryDuration, "%.1f s");
+        ImGui::SliderFloat("Position X##3", &PlotConfigFrametime.Position.x, 0.0f, ViewportSize.X - 1.0f, "%.0f px");
+        ImGui::SliderFloat("Position Y##3", &PlotConfigFrametime.Position.y, 0.0f, ViewportSize.Y - 1.0f, "%.0f px");
+        ImGui::SliderFloat("Size X##3", &PlotConfigFrametime.Size.x, 0.0f, ViewportSize.X - 1.0f, "%.0f px");
+        ImGui::SliderFloat("Size Y##3", &PlotConfigFrametime.Size.y, 0.0f, ViewportSize.Y - 1.0f, "%.0f px");
+        ImGui::SliderFloat("Range Min##3", &PlotConfigFrametime.Range.x, 0.1f, 220.0f, "%.3f ms");
+        ImGui::SliderFloat("Range Max##3", &PlotConfigFrametime.Range.y, 0.1f, 240.0f, "%.3f ms");
+        ImGui::ColorEdit4("Background##3", &PlotConfigFrametime.BackgroundColor.x);
+        ImGui::SliderFloat("Plot Alpha##3", &PlotConfigFrametime.FillAlpha, 0.0f, 1.0f, "%.2f");
+        ImGui::ColorEdit4("Plot Background##3", &PlotConfigFrametime.PlotBackgroundColor.x);
+        ImGui::ColorEdit4("Plot Line##3", &PlotConfigFrametime.LineColor.x);
+        ImGui::ColorEdit4("Plot Shade##3", &PlotConfigFrametime.ShadeColor.x);
+        ImGui::SliderFloat("Marker Line##3", &PlotConfigFrametime.MarkerLineWidth, 1.0f, 144.0f, "%.3f");
+        ImGui::SliderFloat("Marker Thickness##3", &PlotConfigFrametime.MarkerThickness, 1.0f, 10.0f, "%.0f");
       }
       ImGui::Unindent();
     }
@@ -999,15 +837,38 @@ void FDFX_StatData::LoadDefaultValues(UGameViewportClient* InViewportClient) {
 
   ViewportClient = InViewportClient;
   ViewportClient->GetViewportSize(ViewportSize);
+  FDisplayMetrics::RebuildDisplayMetrics(DisplayMetrics);
 
-  ThreadPlotConfig.bVisible = true;
-  ThreadPlotConfig.HistoryDuration = 3.0f;
-  ThreadPlotConfig.Range = ImVec2(0, 20);
-  ThreadPlotConfig.Position = ImVec2(0, 0);
-  ThreadPlotConfig.Size = ImVec2(ViewportSize.X / 4, ViewportSize.Y / 3);
-  ThreadPlotConfig.BackgroundColor = ImVec4(0.21f, 0.22f, 0.23f, 0.05f);
-  ThreadPlotConfig.PlotBackgroundColor = ImVec4(0.32f, 0.50f, 0.77f, 0.05f);
-  ThreadPlotConfig.FillAlpha = 0.5f;
+  // TODO DPIScale is a mess and can be affected by :
+  //   Editor Settings > General > Appearance > Enable High DPI Support
+  //   Editor Settings > Performance > Viewport Resolution section
+  //   Project Settings > Performance > Viewport Resolution section
+  //   Project Settings > Engine > User Interface > Allow High DPI in Game Mode
+  
+  // HACK trying to fix inconsistence of DPI Scale between UE and ImGui
+  //if (ViewportClient->GetWorld()->IsPlayInEditor()) {
+    IConsoleManager& ConsoleManager = IConsoleManager::Get();
+    int32 DPIAware = ConsoleManager.FindConsoleVariable(TEXT("EnableHighDPIAwareness"))->GetInt();
+    if (DPIAware == 1) {
+      float DPIScale = ViewportClient->GetDPIScale();
+      if (DPIScale != 1.f)  {
+        ViewportSize.X = ViewportSize.X / DPIScale;
+        ViewportSize.Y = ViewportSize.Y / DPIScale;
+      }
+    }
+
+    UE_LOG(LogDFoundryFX, Log, TEXT("LoadDefaultValues: Resolution: %ix%i | DPIAware: %i | DPIScale : %.2f."), (int)ViewportSize.X, (int)ViewportSize.Y, DPIAware, ViewportClient->GetDPIScale());
+    //GEngine->AddOnScreenDebugMessage(-1, 5.0f, FColor::Green, FString::Printf(TEXT("LoadDefaultValues: Resolution: %ix%i | DPIAware: %i | DPIScale : %.2f."), (int)ViewportSize.X, (int)ViewportSize.Y, DPIAware, ViewportClient->GetDPIScale()));
+  //}
+
+  PlotConfigThreads.bVisible = true;
+  PlotConfigThreads.HistoryDuration = 3.0f;
+  PlotConfigThreads.Range = ImVec2(0, 20);
+  PlotConfigThreads.Position = ImVec2(0, 0);
+  PlotConfigThreads.Size = ImVec2(ViewportSize.X / 4, ViewportSize.Y / 3);
+  PlotConfigThreads.BackgroundColor = ImVec4(0.21f, 0.22f, 0.23f, 0.05f);
+  PlotConfigThreads.PlotBackgroundColor = ImVec4(0.32f, 0.50f, 0.77f, 0.05f);
+  PlotConfigThreads.FillAlpha = 0.5f;
 
   ThreadPlotStyles[0].bShowFramePlot = true;
   ThreadPlotStyles[0].LineColor = ImVec4(0.75f, 0.196f, 0.196f, 1.0f);
@@ -1031,37 +892,37 @@ void FDFX_StatData::LoadDefaultValues(UGameViewportClient* InViewportClient) {
   ThreadPlotStyles[6].LineColor = ImVec4(0.080f, 0.145f, 0.318f, 1.0f);
   ThreadPlotStyles[6].ShadeColor = ImVec4(0.161f, 0.29f, 0.478f, 1.0f);
 
-  ThreadPlotConfig.MarkerColor = ImVec4(0.0f, 0.25f, 0.0f, 1.0f);
-  ThreadPlotConfig.MarkerLineWidth = 16.667f;
-  ThreadPlotConfig.MarkerThickness = 1.0f;
+  PlotConfigThreads.MarkerColor = ImVec4(0.0f, 0.25f, 0.0f, 1.0f);
+  PlotConfigThreads.MarkerLineWidth = 16.667f;
+  PlotConfigThreads.MarkerThickness = 1.0f;
 
-  FramePlotConfig.bVisible = true;
-  FramePlotConfig.HistoryDuration = 3.0f;
-  FramePlotConfig.Range = ImVec2(8, 24);
-  FramePlotConfig.Position = ImVec2(0, (ViewportSize.Y / 3) * 1);
-  FramePlotConfig.Size = ImVec2(ViewportSize.X / 4, ViewportSize.Y / 3);
-  FramePlotConfig.BackgroundColor = ImVec4(0.21f, 0.22f, 0.23f, 0.05f);
-  FramePlotConfig.PlotBackgroundColor = ImVec4(0.32f, 0.50f, 0.77f, 0.05f);
-  FramePlotConfig.FillAlpha = 0.5f;
-  FramePlotConfig.LineColor = ImVec4(0.161f, 0.29f, 0.478f, 1.0f);
-  FramePlotConfig.ShadeColor = ImVec4(0.298f, 0.447f, 0.69f, 1.0f);
-  FramePlotConfig.MarkerColor = ImVec4(0.0f, 0.25f, 0.0f, 1.0f);
-  FramePlotConfig.MarkerLineWidth = 16.667f;
-  FramePlotConfig.MarkerThickness = 1.0f;
+  PlotConfigFramerate.bVisible = true;
+  PlotConfigFramerate.HistoryDuration = 3.0f;
+  PlotConfigFramerate.Range = ImVec2(8, 24);
+  PlotConfigFramerate.Position = ImVec2(0, (ViewportSize.Y / 3) * 1);
+  PlotConfigFramerate.Size = ImVec2(ViewportSize.X / 4, ViewportSize.Y / 3);
+  PlotConfigFramerate.BackgroundColor = ImVec4(0.21f, 0.22f, 0.23f, 0.05f);
+  PlotConfigFramerate.PlotBackgroundColor = ImVec4(0.32f, 0.50f, 0.77f, 0.05f);
+  PlotConfigFramerate.FillAlpha = 0.5f;
+  PlotConfigFramerate.LineColor = ImVec4(0.161f, 0.29f, 0.478f, 1.0f);
+  PlotConfigFramerate.ShadeColor = ImVec4(0.298f, 0.447f, 0.69f, 1.0f);
+  PlotConfigFramerate.MarkerColor = ImVec4(0.0f, 0.25f, 0.0f, 1.0f);
+  PlotConfigFramerate.MarkerLineWidth = 16.667f;
+  PlotConfigFramerate.MarkerThickness = 1.0f;
 
-  FPSPlotConfig.bVisible = true;
-  FPSPlotConfig.HistoryDuration = 3.0f;
-  FPSPlotConfig.Range = ImVec2(20, 80);
-  FPSPlotConfig.Position = ImVec2(0, (ViewportSize.Y / 3) * 2);
-  FPSPlotConfig.Size = ImVec2(ViewportSize.X, ViewportSize.Y / 3);
-  FPSPlotConfig.BackgroundColor = ImVec4(0.21f, 0.22f, 0.23f, 0.05f);
-  FPSPlotConfig.PlotBackgroundColor = ImVec4(0.32f, 0.50f, 0.77f, 0.05f);
-  FPSPlotConfig.FillAlpha = 0.5f;
-  FPSPlotConfig.LineColor = ImVec4(0.161f, 0.29f, 0.478f, 1.0f);
-  FPSPlotConfig.ShadeColor = ImVec4(0.298f, 0.447f, 0.69f, 1.0f);
-  FPSPlotConfig.MarkerColor = ImVec4(0.0f, 0.25f, 0.0f, 1.0f);
-  FPSPlotConfig.MarkerLineWidth = 60.0f;
-  FPSPlotConfig.MarkerThickness = 1.0f;
+  PlotConfigFrametime.bVisible = true;
+  PlotConfigFrametime.HistoryDuration = 3.0f;
+  PlotConfigFrametime.Range = ImVec2(20, 80);
+  PlotConfigFrametime.Position = ImVec2(0, (ViewportSize.Y / 3) * 2);
+  PlotConfigFrametime.Size = ImVec2(ViewportSize.X, ViewportSize.Y / 3);
+  PlotConfigFrametime.BackgroundColor = ImVec4(0.21f, 0.22f, 0.23f, 0.05f);
+  PlotConfigFrametime.PlotBackgroundColor = ImVec4(0.32f, 0.50f, 0.77f, 0.05f);
+  PlotConfigFrametime.FillAlpha = 0.5f;
+  PlotConfigFrametime.LineColor = ImVec4(0.161f, 0.29f, 0.478f, 1.0f);
+  PlotConfigFrametime.ShadeColor = ImVec4(0.298f, 0.447f, 0.69f, 1.0f);
+  PlotConfigFrametime.MarkerColor = ImVec4(0.0f, 0.25f, 0.0f, 1.0f);
+  PlotConfigFrametime.MarkerLineWidth = 60.0f;
+  PlotConfigFrametime.MarkerThickness = 1.0f;
 
   bShowPlots = true;
   bSortPlots = false;
@@ -1080,278 +941,18 @@ void FDFX_StatData::LoadDefaultValues(UGameViewportClient* InViewportClient) {
   SwapBufferTimeHistory.Reset();
   InputLatencyTimeHistory.Reset();
   ImGuiThreadTimeHistory.Reset();
-
-  // Pre-loading Engine Tab contents
-  //InitEngineContextEntries();
 }
 
-void FDFX_StatData::InitEngineContextEntries() {
-  Engine_MemoryEntries.Empty();
-  Engine_ViewportEntries.Empty();
-  Engine_GEngineEntries.Empty();
-  Engine_RHIEntries.Empty();
-  Engine_PlatformEntries.Empty();
-
-  Engine_MemoryEntries.Emplace(TEXT("Mem"), TFunction<FString()>([]() { return GetMemoryString(FPlatformMemory::GetStats().UsedPhysical); }));
-  Engine_MemoryEntries.Emplace(TEXT("MemPeak"), TFunction<FString()>([]() { return GetMemoryString(FPlatformMemory::GetStats().PeakUsedPhysical); }));
-  Engine_MemoryEntries.Emplace(TEXT("MemAvail"), TFunction<FString()>([]() { return GetMemoryString(FPlatformMemory::GetStats().AvailablePhysical); }));
-  Engine_MemoryEntries.Emplace(TEXT("MemTotal"), TFunction<FString()>([]() { return GetMemoryString(FPlatformMemory::GetStats().TotalPhysical); }));
-  Engine_MemoryEntries.Emplace(TEXT("VMem"), TFunction<FString()>([]() { return GetMemoryString(FPlatformMemory::GetStats().UsedVirtual); }));
-  Engine_MemoryEntries.Emplace(TEXT("VMemPeak"), TFunction<FString()>([]() { return GetMemoryString(FPlatformMemory::GetStats().PeakUsedVirtual); }));
-  Engine_MemoryEntries.Emplace(TEXT("VMemAvail"), TFunction<FString()>([]() { return GetMemoryString(FPlatformMemory::GetStats().AvailableVirtual); }));
-  Engine_MemoryEntries.Emplace(TEXT("VMemTotal"), TFunction<FString()>([]() { return GetMemoryString(FPlatformMemory::GetStats().TotalVirtual); }));
-
-  Engine_ViewportEntries.Emplace(TEXT("bIsPlayInEditorViewport"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), ViewportClient->bIsPlayInEditorViewport ? TEXT("true") : TEXT("false")); }));
-  Engine_ViewportEntries.Emplace(TEXT("GetDPIScale"), TFunction<FString()>([]() { return FString::Printf(TEXT("%.2f"), ViewportClient->GetDPIScale()); }));
-  Engine_ViewportEntries.Emplace(TEXT("GetDPIDerivedResolutionFraction"), TFunction<FString()>([]() { return FString::Printf(TEXT("%.2f"), ViewportClient->GetDPIDerivedResolutionFraction()); }));
-  Engine_ViewportEntries.Emplace(TEXT("IsCursorVisible"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), ViewportClient->Viewport->IsCursorVisible() ? TEXT("true") : TEXT("false")); }));
-  Engine_ViewportEntries.Emplace(TEXT("IsForegroundWindow"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), ViewportClient->Viewport->IsForegroundWindow() ? TEXT("true") : TEXT("false")); }));
-  Engine_ViewportEntries.Emplace(TEXT("IsExclusiveFullscreen"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), ViewportClient->Viewport->IsExclusiveFullscreen() ? TEXT("true") : TEXT("false")); }));
-  Engine_ViewportEntries.Emplace(TEXT("IsFullscreen"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), ViewportClient->Viewport->IsFullscreen() ? TEXT("true") : TEXT("false")); }));
-  Engine_ViewportEntries.Emplace(TEXT("IsGameRenderingEnabled"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), ViewportClient->Viewport->IsGameRenderingEnabled() ? TEXT("true") : TEXT("false")); }));
-  Engine_ViewportEntries.Emplace(TEXT("IsHDRViewport"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), ViewportClient->Viewport->IsHDRViewport() ? TEXT("true") : TEXT("false")); }));
-  Engine_ViewportEntries.Emplace(TEXT("IsKeyboardAvailable"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), ViewportClient->Viewport->IsKeyboardAvailable(0) ? TEXT("true") : TEXT("false")); }));
-  Engine_ViewportEntries.Emplace(TEXT("IsMouseAvailable"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), ViewportClient->Viewport->IsMouseAvailable(0) ? TEXT("true") : TEXT("false")); }));
-  Engine_ViewportEntries.Emplace(TEXT("IsPenActive"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), ViewportClient->Viewport->IsPenActive() ? TEXT("true") : TEXT("false")); }));
-  Engine_ViewportEntries.Emplace(TEXT("IsPlayInEditorViewport"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), ViewportClient->Viewport->IsPlayInEditorViewport() ? TEXT("true") : TEXT("false")); }));
-  Engine_ViewportEntries.Emplace(TEXT("IsSlateViewport"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), ViewportClient->Viewport->IsSlateViewport() ? TEXT("true") : TEXT("false")); }));
-  Engine_ViewportEntries.Emplace(TEXT("IsSoftwareCursorVisible"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), ViewportClient->Viewport->IsSoftwareCursorVisible() ? TEXT("true") : TEXT("false")); }));
-  Engine_ViewportEntries.Emplace(TEXT("IsStereoRenderingAllowed"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), ViewportClient->Viewport->IsStereoRenderingAllowed() ? TEXT("true") : TEXT("false")); }));
-
-  Engine_GEngineEntries.Emplace(TEXT("IsEditor"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->IsEditor() ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("IsAllowedFramerateSmoothing"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->IsAllowedFramerateSmoothing() ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bForceDisableFrameRateSmoothing"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bForceDisableFrameRateSmoothing ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bSmoothFrameRate"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bSmoothFrameRate ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("MinDesiredFrameRate"), TFunction<FString()>([]() { return FString::Printf(TEXT("%.2f"), GEngine->MinDesiredFrameRate); }));
-  Engine_GEngineEntries.Emplace(TEXT("bUseFixedFrameRate"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bUseFixedFrameRate ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("FixedFrameRate"), TFunction<FString()>([]() { return FString::Printf(TEXT("%.2f"), GEngine->FixedFrameRate); }));
-  Engine_GEngineEntries.Emplace(TEXT("bCanBlueprintsTickByDefault"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bCanBlueprintsTickByDefault ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("IsControllerIdUsingPlatformUserId"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->IsControllerIdUsingPlatformUserId() ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("IsStereoscopic3D"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->IsStereoscopic3D(ViewportClient->Viewport) ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("IsVanillaProduct"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->IsVanillaProduct() ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("HasMultipleLocalPlayers"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->HasMultipleLocalPlayers(ViewportClient->GetWorld()) ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("AreEditorAnalyticsEnabled"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->AreEditorAnalyticsEnabled() ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bAllowMultiThreadedAnimationUpdate"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bAllowMultiThreadedAnimationUpdate ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bDisableAILogging"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bDisableAILogging ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bEnableOnScreenDebugMessages"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bEnableOnScreenDebugMessages ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bEnableOnScreenDebugMessagesDisplay"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bEnableOnScreenDebugMessagesDisplay ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bEnableEditorPSysRealtimeLOD"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bEnableEditorPSysRealtimeLOD ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bEnableVisualLogRecordingOnStart"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bEnableVisualLogRecordingOnStart ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bGenerateDefaultTimecode"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bGenerateDefaultTimecode ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bIsInitialized"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bIsInitialized ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bLockReadOnlyLevels"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bLockReadOnlyLevels ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bOptimizeAnimBlueprintMemberVariableAccess"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bOptimizeAnimBlueprintMemberVariableAccess ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bPauseOnLossOfFocus"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bPauseOnLossOfFocus ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bRenderLightMapDensityGrayscale"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bRenderLightMapDensityGrayscale ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bShouldGenerateLowQualityLightmaps_DEPRECATED"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bShouldGenerateLowQualityLightmaps_DEPRECATED ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("BSPSelectionHighlightIntensity"), TFunction<FString()>([]() { return FString::Printf(TEXT("%.2f"), GEngine->BSPSelectionHighlightIntensity); }));
-  Engine_GEngineEntries.Emplace(TEXT("bStartedLoadMapMovie"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bStartedLoadMapMovie ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bSubtitlesEnabled"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bSubtitlesEnabled ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bSubtitlesForcedOff"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bSubtitlesForcedOff ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("bSuppressMapWarnings"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->bSuppressMapWarnings ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("DisplayGamma"), TFunction<FString()>([]() { return FString::Printf(TEXT("%.2f"), GEngine->DisplayGamma); }));
-  Engine_GEngineEntries.Emplace(TEXT("IsAutosaving"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->IsAutosaving() ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("MaximumLoopIterationCount"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), GEngine->MaximumLoopIterationCount); }));
-  Engine_GEngineEntries.Emplace(TEXT("MaxLightMapDensity"), TFunction<FString()>([]() { return FString::Printf(TEXT("%.2f"), GEngine->MaxLightMapDensity); }));
-  Engine_GEngineEntries.Emplace(TEXT("MaxOcclusionPixelsFraction"), TFunction<FString()>([]() { return FString::Printf(TEXT("%.2f"), GEngine->MaxOcclusionPixelsFraction); }));
-  Engine_GEngineEntries.Emplace(TEXT("MaxParticleResize"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), GEngine->MaxParticleResize); }));
-  Engine_GEngineEntries.Emplace(TEXT("MaxParticleResizeWarn"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), GEngine->MaxParticleResizeWarn); }));
-  Engine_GEngineEntries.Emplace(TEXT("MaxPixelShaderAdditiveComplexityCount"), TFunction<FString()>([]() { return FString::Printf(TEXT("%.2f"), GEngine->MaxPixelShaderAdditiveComplexityCount); }));
-  Engine_GEngineEntries.Emplace(TEXT("UseSkeletalMeshMinLODPerQualityLevels"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->UseSkeletalMeshMinLODPerQualityLevels ? TEXT("true") : TEXT("false")); }));
-  Engine_GEngineEntries.Emplace(TEXT("UseStaticMeshMinLODPerQualityLevels"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GEngine->UseStaticMeshMinLODPerQualityLevels ? TEXT("true") : TEXT("false")); }));
-
-  Engine_RHIEntries.Emplace(TEXT("GRHIAdapterDriverDate"), TFunction<FString()>([]() { return FString(GRHIAdapterDriverDate); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIAdapterDriverOnDenyList"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHIAdapterDriverOnDenyList ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIAdapterInternalDriverVersion"), TFunction<FString()>([]() { return FString(GRHIAdapterInternalDriverVersion); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIAdapterName"), TFunction<FString()>([]() { return FString(GRHIAdapterName); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIAdapterUserDriverVersion"), TFunction<FString()>([]() { return FString(GRHIAdapterUserDriverVersion); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIAttachmentVariableRateShadingEnabled"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsAttachmentVariableRateShading ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIDeviceId"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), GRHIDeviceId); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIDeviceIsAMDPreGCNArchitecture"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHIDeviceIsAMDPreGCNArchitecture ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIDeviceIsIntegrated"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHIDeviceIsIntegrated ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIDeviceRevision"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), GRHIDeviceRevision); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIForceNoDeletionLatencyForStreamingTextures"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHIForceNoDeletionLatencyForStreamingTextures ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIIsHDREnabled"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHIIsHDREnabled ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHILazyShaderCodeLoading"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHILazyShaderCodeLoading ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIMinimumWaveSize"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), GRHIMinimumWaveSize); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIMaximumWaveSize"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), GRHIMaximumWaveSize); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHINeedsExtraDeletionLatency"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHINeedsExtraDeletionLatency ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHINeedsUnatlasedCSMDepthsWorkaround"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHINeedsUnatlasedCSMDepthsWorkaround ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIPersistentThreadGroupCount"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), GRHIPersistentThreadGroupCount); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIPresentCounter"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), GRHIPresentCounter); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIRayTracingAccelerationStructureAlignment"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), GRHIRayTracingAccelerationStructureAlignment); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIRayTracingScratchBufferAlignment"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), GRHIRayTracingScratchBufferAlignment); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIRequiresRenderTargetForPixelShaderUAVs"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHIRequiresRenderTargetForPixelShaderUAVs ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsArrayIndexFromAnyShader"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsArrayIndexFromAnyShader ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsAsyncPipelinePrecompile"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsAsyncPipelinePrecompile ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsAsyncTextureCreation"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsAsyncTextureCreation ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsAtomicUInt64"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsAtomicUInt64 ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsAttachmentVariableRateShading"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsAttachmentVariableRateShading ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsBackBufferWithCustomDepthStencil"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsBackBufferWithCustomDepthStencil ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsBaseVertexIndex"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsBaseVertexIndex ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsComplexVariableRateShadingCombinerOps"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsComplexVariableRateShadingCombinerOps ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsConservativeRasterization"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsConservativeRasterization ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsDepthUAV"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsDepthUAV ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsDirectGPUMemoryLock"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsDirectGPUMemoryLock ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsDrawIndirect"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsDrawIndirect ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsDX12AtomicUInt64"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsDX12AtomicUInt64 ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsDynamicResolution"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsDynamicResolution ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsEfficientUploadOnResourceCreation"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsEfficientUploadOnResourceCreation ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsExactOcclusionQueries"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsExactOcclusionQueries ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsExplicitFMask"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsExplicitFMask ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsExplicitHTile"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsExplicitHTile ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsFirstInstance"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsFirstInstance ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsFrameCyclesBubblesRemoval"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsFrameCyclesBubblesRemoval ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsGPUTimestampBubblesRemoval"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsGPUTimestampBubblesRemoval ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsHDROutput"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsHDROutput ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsInlineRayTracing"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsInlineRayTracing ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsLargerVariableRateShadingSizes"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsLargerVariableRateShadingSizes ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsLateVariableRateShadingUpdate"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsLateVariableRateShadingUpdate ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsLazyShaderCodeLoading"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsLazyShaderCodeLoading ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsMapWriteNoOverwrite"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsMapWriteNoOverwrite ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsMeshShadersTier0"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsMeshShadersTier0 ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsMeshShadersTier1"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsMeshShadersTier1 ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsMSAADepthSampleAccess"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsMSAADepthSampleAccess ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsMultithreadedResources"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsMultithreadedResources ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsMultithreadedShaderCreation"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsMultithreadedShaderCreation ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsMultithreading"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsMultithreading ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsParallelRHIExecute"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsParallelRHIExecute ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsPipelineFileCache"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsPipelineFileCache ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsPipelineStateSortKey"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsPipelineStateSortKey ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsPipelineVariableRateShading"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsPipelineVariableRateShading ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsPixelShaderUAVs"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsPixelShaderUAVs ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsPrimitiveShaders"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsPrimitiveShaders ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsQuadTopology"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsQuadTopology ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsRawViewsForAnyBuffer"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsRawViewsForAnyBuffer ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsRayTracing"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsRayTracing ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsRayTracingAMDHitToken"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsRayTracingAMDHitToken ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsRayTracingAsyncBuildAccelerationStructure"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsRayTracingAsyncBuildAccelerationStructure ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsRayTracingDispatchIndirect"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsRayTracingDispatchIndirect ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsRayTracingPSOAdditions"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsRayTracingPSOAdditions ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsRayTracingShaders"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsRayTracingShaders ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsRectTopology"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsRectTopology ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsResummarizeHTile"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsResummarizeHTile ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsRHIOnTaskThread"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsRHIOnTaskThread ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsRHIThread"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsRHIThread ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsRWTextureBuffers"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsRWTextureBuffers ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsSeparateDepthStencilCopyAccess"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsSeparateDepthStencilCopyAccess ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsShaderTimestamp"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsShaderTimestamp ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsStencilRefFromPixelShader"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsStencilRefFromPixelShader ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsTextureStreaming"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsTextureStreaming ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsUAVFormatAliasing"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsUAVFormatAliasing ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsUpdateFromBufferTexture"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsUpdateFromBufferTexture ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsVariableRateShadingAttachmentArrayTextures"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsVariableRateShadingAttachmentArrayTextures ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHISupportsWaveOperations"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHISupportsWaveOperations ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIThreadNeedsKicking"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHIThreadNeedsKicking ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIThreadTime"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), GRHIThreadTime); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIValidationEnabled"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GRHIValidationEnabled ? TEXT("true") : TEXT("false")); }));
-//  Engine_RHIEntries.Emplace(TEXT("GRHIVariableRateShadingEnabled"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), GVRSImageManager.IsAttachmentVRSEnabled() ? TEXT("true") : TEXT("false")); }));
-  Engine_RHIEntries.Emplace(TEXT("GRHIVendorId"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), GRHIVendorId); }));
-
-  Engine_PlatformEntries.Emplace(TEXT("AllowAudioThread"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::AllowAudioThread() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("AllowLocalCaching"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::AllowLocalCaching() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("AllowThreadHeartBeat"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::AllowThreadHeartBeat() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("CloudDir"), TFunction<FString()>([]() { return FGenericPlatformMisc::CloudDir(); }));
-  Engine_PlatformEntries.Emplace(TEXT("DesktopTouchScreen"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::DesktopTouchScreen() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("EngineDir"), TFunction<FString()>([]() { return FGenericPlatformMisc::EngineDir(); }));
-  Engine_PlatformEntries.Emplace(TEXT("FullscreenSameAsWindowedFullscreen"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::FullscreenSameAsWindowedFullscreen() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("GamePersistentDownloadDir"), TFunction<FString()>([]() { return FGenericPlatformMisc::GamePersistentDownloadDir(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GameTemporaryDownloadDir"), TFunction<FString()>([]() { return FGenericPlatformMisc::GameTemporaryDownloadDir(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetBatteryLevel"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), FGenericPlatformMisc::GetBatteryLevel()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetBrightness"), TFunction<FString()>([]() { return FString::Printf(TEXT("%.2f"), FGenericPlatformMisc::GetBrightness()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetCPUBrand"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetCPUBrand(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetCPUChipset"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetCPUChipset(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetCPUInfo"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), FGenericPlatformMisc::GetCPUInfo()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetCPUVendor"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetCPUVendor(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetDefaultDeviceProfileName"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetDefaultDeviceProfileName(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetDefaultLanguage"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetDefaultLanguage(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetDefaultLocale"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetDefaultLocale(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetDefaultPathSeparator"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::GetDefaultPathSeparator()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetDeviceId"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetDeviceId(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetDeviceMakeAndModel"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetDeviceMakeAndModel(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetDeviceTemperatureLevel"), TFunction<FString()>([]() { return FString::Printf(TEXT("%.2f"), FGenericPlatformMisc::GetDeviceTemperatureLevel()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetDeviceVolume"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), FGenericPlatformMisc::GetDeviceVolume()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetEngineMode"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::GetEngineMode()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetEpicAccountId"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetEpicAccountId(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetFileManagerName"), TFunction<FString()>([]() {  return FGenericPlatformMisc::GetFileManagerName().ToString(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetLastError"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), FGenericPlatformMisc::GetLastError()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetLocalCurrencyCode"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetLocalCurrencyCode(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetLocalCurrencySymbol"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetLocalCurrencySymbol(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetLoginId"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetLoginId(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetMaxPathLength"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), FGenericPlatformMisc::GetMaxPathLength()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetMaxRefreshRate"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), FGenericPlatformMisc::GetMaxRefreshRate()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetMaxSupportedRefreshRate"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), FGenericPlatformMisc::GetMaxSupportedRefreshRate()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetMaxSyncInterval"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), FGenericPlatformMisc::GetMaxSyncInterval()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetMobilePropagateAlphaSetting"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::GetMobilePropagateAlphaSetting() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetNullRHIShaderFormat"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::GetNullRHIShaderFormat()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetOperatingSystemId"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), *FGenericPlatformMisc::GetOperatingSystemId()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetOSVersion"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetOSVersion(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetPathVarDelimiter"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::GetPathVarDelimiter()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetPlatformFeaturesModuleName"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::GetPlatformFeaturesModuleName()); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetPrimaryGPUBrand"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetPrimaryGPUBrand(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetTimeZoneId"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetTimeZoneId(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetUBTPlatform"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetUBTPlatform(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetUniqueAdvertisingId"), TFunction<FString()>([]() { return FGenericPlatformMisc::GetUniqueAdvertisingId(); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetUseVirtualJoysticks"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::GetUseVirtualJoysticks() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("GetVolumeButtonsHandledBySystem"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::GetVolumeButtonsHandledBySystem() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("HasActiveWiFiConnection"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::HasActiveWiFiConnection() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("HasMemoryWarningHandler"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::HasMemoryWarningHandler() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("HasNonoptionalCPUFeatures"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::HasNonoptionalCPUFeatures() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("HasProjectPersistentDownloadDir"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::HasProjectPersistentDownloadDir() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("HasSeparateChannelForDebugOutput"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::HasSeparateChannelForDebugOutput() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("HasVariableHardware"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::HasVariableHardware() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("Is64bitOperatingSystem"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::Is64bitOperatingSystem() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("IsDebuggerPresent"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::IsDebuggerPresent() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("IsEnsureAllowed"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::IsEnsureAllowed() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("IsInLowPowerMode"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::IsInLowPowerMode() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("IsLocalPrintThreadSafe"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::IsLocalPrintThreadSafe() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("IsPackagedForDistribution"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::IsPackagedForDistribution() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("IsPGOEnabled"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::IsPGOEnabled() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("IsRegisteredForRemoteNotifications"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::IsRegisteredForRemoteNotifications() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("IsRemoteSession"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::IsRemoteSession() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("IsRunningInCloud"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::IsRunningInCloud() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("IsRunningOnBattery"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::IsRunningOnBattery() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("LaunchDir"), TFunction<FString()>([]() { return FGenericPlatformMisc::LaunchDir(); }));
-  Engine_PlatformEntries.Emplace(TEXT("NeedsNonoptionalCPUFeaturesCheck"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::NeedsNonoptionalCPUFeaturesCheck() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("NumberOfCores"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), FGenericPlatformMisc::NumberOfCores()); }));
-  Engine_PlatformEntries.Emplace(TEXT("NumberOfCoresIncludingHyperthreads"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), FGenericPlatformMisc::NumberOfCoresIncludingHyperthreads()); }));
-  Engine_PlatformEntries.Emplace(TEXT("NumberOfIOWorkerThreadsToSpawn"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), FGenericPlatformMisc::NumberOfIOWorkerThreadsToSpawn()); }));
-  Engine_PlatformEntries.Emplace(TEXT("NumberOfWorkerThreadsToSpawn"), TFunction<FString()>([]() { return FString::Printf(TEXT("%d"), FGenericPlatformMisc::NumberOfWorkerThreadsToSpawn()); }));
-  Engine_PlatformEntries.Emplace(TEXT("ProjectDir"), TFunction<FString()>([]() { return FGenericPlatformMisc::ProjectDir(); }));
-  Engine_PlatformEntries.Emplace(TEXT("SupportsBackbufferSampling"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::SupportsBackbufferSampling() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("SupportsBrightness"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::SupportsBrightness() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("SupportsDeviceCheckToken"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::SupportsDeviceCheckToken() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("SupportsForceTouchInput"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::SupportsForceTouchInput() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("SupportsFullCrashDumps"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::SupportsFullCrashDumps() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("SupportsLocalCaching"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::SupportsLocalCaching() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("SupportsMessaging"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::SupportsMessaging() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("SupportsMultithreadedFileHandles"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::SupportsMultithreadedFileHandles() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("SupportsTouchInput"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::SupportsTouchInput() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("UseHDRByDefault"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::UseHDRByDefault() ? TEXT("true") : TEXT("false")); }));
-  Engine_PlatformEntries.Emplace(TEXT("UseRenderThread"), TFunction<FString()>([]() { return FString::Printf(TEXT("%s"), FGenericPlatformMisc::UseRenderThread() ? TEXT("true") : TEXT("false")); }));
-}
-
-void FDFX_StatData::LoadThreadPlotConfig() {
-  ImGui::SetNextWindowPos(ThreadPlotConfig.Position);
-  ImGui::SetNextWindowSize(ThreadPlotConfig.Size);
-  ImGui::SetNextWindowBgAlpha(ThreadPlotConfig.BackgroundColor.w);
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
-  ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 0.0f);
-  ImGui::PushStyleColor(ImGuiCol_WindowBg, ThreadPlotConfig.BackgroundColor);
-  ImGui::Begin("Threads", nullptr, MainWindowFlags);
-  ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
-  ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(0, 0));
-  ImPlot::PushStyleVar(ImPlotStyleVar_PlotMinSize, ImVec2(100, 75));
-  ImPlot::PushStyleVar(ImPlotStyleVar_LegendPadding, ImVec2(0, 0));
-  ImPlot::PushStyleColor(ImPlotCol_PlotBg, ThreadPlotConfig.PlotBackgroundColor);
+void FDFX_StatData::RenderPlotThreads() {
+  ImGui::SetNextWindowPos(PlotConfigThreads.Position);
+  ImGui::SetNextWindowSize(PlotConfigThreads.Size);
+  RenderPlotStyleBegin(EPlotType::Threads);
   ImPlot::BeginPlot("THREADS (MS)", ImVec2(-1, -1), PlotFlags | ImPlotFlags_NoLegend);
   ImPlot::SetupAxes("Threads", "", AxisFlags, ImPlotAxisFlags_Opposite | ImPlotAxisFlags_NoLabel);
-  ImPlot::SetupAxisLimits(ImAxis_X1, CurrentTime - ThreadPlotConfig.HistoryDuration, CurrentTime, ImGuiCond_Always);
-  ImPlot::SetupAxisLimits(ImAxis_Y1, ThreadPlotConfig.Range.x, ThreadPlotConfig.Range.y, ImGuiCond_Always);
+  ImPlot::SetupAxisLimits(ImAxis_X1, CurrentTime - PlotConfigThreads.HistoryDuration, CurrentTime, ImGuiCond_Always);
+  ImPlot::SetupAxisLimits(ImAxis_Y1, PlotConfigThreads.Range.x, PlotConfigThreads.Range.y, ImGuiCond_Always);
   ImPlot::SetupFinish();
-  ImPlot::PushStyleVar(ImPlotStyleVar_FillAlpha, ThreadPlotConfig.FillAlpha);
+  ImPlot::PushStyleVar(ImPlotStyleVar_FillAlpha, PlotConfigThreads.FillAlpha);
 
   TArray<bool> ThreadDrawOrder;
   TArray<float> ThreadPlotOrder;
@@ -1463,19 +1064,15 @@ void FDFX_StatData::LoadThreadPlotConfig() {
     }
   }
 
-  double MarkerLine = ThreadPlotConfig.MarkerLineWidth;
-  ImPlot::DragLineY(0, &MarkerLine, ThreadPlotConfig.MarkerColor, ThreadPlotConfig.MarkerThickness, DragFlags);
+  double MarkerLine = PlotConfigThreads.MarkerLineWidth;
+  ImPlot::DragLineY(0, &MarkerLine, PlotConfigThreads.MarkerColor, PlotConfigThreads.MarkerThickness, DragFlags);
   ImPlot::PopStyleVar();
 
   ImPlot::EndPlot();
-  ImPlot::PopStyleColor();
-  ImPlot::PopStyleVar(4);
-  ImGui::End();
-  ImGui::PopStyleColor();
-  ImGui::PopStyleVar(4);
+  RenderPlotStyleEnd();
 
   // Custom Plot Legend
-  ImGui::SetNextWindowPos(ImVec2(ThreadPlotConfig.Position.x, ThreadPlotConfig.Position.y + ImGui::CalcTextSize("THREADS").y + 4));
+  ImGui::SetNextWindowPos(ImVec2(PlotConfigThreads.Position.x, PlotConfigThreads.Position.y + ImGui::CalcTextSize("THREADS").y + 4));
   ImGui::SetNextWindowSize(ImVec2(-1, -1));
   ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
@@ -1560,78 +1157,78 @@ void FDFX_StatData::LoadThreadPlotConfig() {
   ImGui::BringWindowToDisplayFront(ImGui::FindWindowByName("##ThreadsLegendWin"));
 }
 
-void FDFX_StatData::LoadFramePlotConfig() {
-  ImGui::SetNextWindowPos(FramePlotConfig.Position);
-  ImGui::SetNextWindowSize(FramePlotConfig.Size);
-  ImGui::SetNextWindowBgAlpha(FramePlotConfig.BackgroundColor.w);
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-  ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-  ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
-  ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 0.0f);
-  ImGui::PushStyleColor(ImGuiCol_WindowBg, FramePlotConfig.BackgroundColor);
-  ImGui::Begin("Frametime", nullptr, MainWindowFlags);
-  ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
-  ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(0, 0));
-  ImPlot::PushStyleVar(ImPlotStyleVar_PlotMinSize, ImVec2(100, 75));
-  ImPlot::PushStyleVar(ImPlotStyleVar_LegendPadding, ImVec2(0, 0));
-  ImPlot::PushStyleColor(ImPlotCol_PlotBg, FramePlotConfig.PlotBackgroundColor);
+void FDFX_StatData::RenderPlotFrametime() {
+  ImGui::SetNextWindowPos(PlotConfigFramerate.Position);
+  ImGui::SetNextWindowSize(PlotConfigFramerate.Size);
+  RenderPlotStyleBegin(EPlotType::Frametime);
   ImPlot::BeginPlot("FRAME-TIME (MS)", ImVec2(-1, -1), PlotFlags | ImPlotFlags_NoLegend);
   ImPlot::SetupAxes("", "", AxisFlags, ImPlotAxisFlags_Opposite | ImPlotAxisFlags_NoLabel | ImPlotAxisFlags_Invert);
-  ImPlot::SetupAxisLimits(ImAxis_X1, CurrentTime - FramePlotConfig.HistoryDuration, CurrentTime, ImGuiCond_Always);
-  ImPlot::SetupAxisLimits(ImAxis_Y1, FramePlotConfig.Range.x, FramePlotConfig.Range.y, ImGuiCond_Always);
+  ImPlot::SetupAxisLimits(ImAxis_X1, CurrentTime - PlotConfigFramerate.HistoryDuration, CurrentTime, ImGuiCond_Always);
+  ImPlot::SetupAxisLimits(ImAxis_Y1, PlotConfigFramerate.Range.x, PlotConfigFramerate.Range.y, ImGuiCond_Always);
   ImPlot::SetupFinish();
-  ImPlot::PushStyleVar(ImPlotStyleVar_FillAlpha, FramePlotConfig.FillAlpha);
-  ImPlot::PushStyleColor(ImPlotCol_Line, FramePlotConfig.LineColor);
-  ImPlot::PushStyleColor(ImPlotCol_Fill, FramePlotConfig.ShadeColor);
+  ImPlot::PushStyleVar(ImPlotStyleVar_FillAlpha, PlotConfigFramerate.FillAlpha);
+  ImPlot::PushStyleColor(ImPlotCol_Line, PlotConfigFramerate.LineColor);
+  ImPlot::PushStyleColor(ImPlotCol_Fill, PlotConfigFramerate.ShadeColor);
   ImPlot::PlotLine("##Frame", &TimeHistory.Data[0], &FrameTimeHistory.Data[0], TimeHistory.Data.Num(), 0, TimeHistory.Offset, sizeof(double));
   ImPlot::PlotShaded("##Frame", &TimeHistory.Data[0], &FrameTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, 0, TimeHistory.Offset, sizeof(double));
-  double MarkerLine = FramePlotConfig.MarkerLineWidth;
-  ImPlot::DragLineY(0, &MarkerLine, FramePlotConfig.MarkerColor, FramePlotConfig.MarkerThickness, DragFlags);
+  double MarkerLine = PlotConfigFramerate.MarkerLineWidth;
+  ImPlot::DragLineY(0, &MarkerLine, PlotConfigFramerate.MarkerColor, PlotConfigFramerate.MarkerThickness, DragFlags);
   ImPlot::PopStyleColor(2);
   ImPlot::PopStyleVar();
   ImPlot::EndPlot();
-  ImPlot::PopStyleColor();
-  ImPlot::PopStyleVar(4);
-  ImGui::End();
-  ImGui::PopStyleColor();
-  ImGui::PopStyleVar(4);
+  RenderPlotStyleEnd();
 }
 
-void FDFX_StatData::LoadFPSPlotConfig() {
-  ImGui::SetNextWindowPos(FPSPlotConfig.Position);
+void FDFX_StatData::RenderPlotFramerate() {  //FPS
+  ImGui::SetNextWindowPos(PlotConfigFrametime.Position);
   if (bMainWindowExpanded) {
 
     ImGui::SetNextWindowSize(ImVec2(ViewportSize.X - ViewportSize.X / 4, ViewportSize.Y / 3));
   } else {
-    ImGui::SetNextWindowSize(FPSPlotConfig.Size);
+    ImGui::SetNextWindowSize(PlotConfigFrametime.Size);
   }
-  ImGui::SetNextWindowBgAlpha(FPSPlotConfig.PlotBackgroundColor.w);
+  RenderPlotStyleBegin(EPlotType::Framerate);
+  ImPlot::BeginPlot("FRAME-RATE (FPS)", ImVec2(-1, -1), PlotFlags | ImPlotFlags_NoLegend);
+  ImPlot::SetupAxes("", "", AxisFlags, ImPlotAxisFlags_Opposite | ImPlotAxisFlags_NoLabel);
+  ImPlot::SetupAxisLimits(ImAxis_X1, CurrentTime - PlotConfigFrametime.HistoryDuration, CurrentTime, ImGuiCond_Always);
+  ImPlot::SetupAxisLimits(ImAxis_Y1, PlotConfigFrametime.Range.x, PlotConfigFrametime.Range.y, ImGuiCond_Always);
+  ImPlot::SetupFinish();
+  ImPlot::PushStyleVar(ImPlotStyleVar_FillAlpha, PlotConfigFrametime.FillAlpha);
+  ImPlot::PushStyleColor(ImPlotCol_Line, PlotConfigFrametime.LineColor);
+  ImPlot::PushStyleColor(ImPlotCol_Fill, PlotConfigFrametime.ShadeColor);
+  ImPlot::PlotLine("##FPS", &TimeHistory.Data[0], &FPSHistory.Data[0], TimeHistory.Data.Num(), 0, TimeHistory.Offset, sizeof(double));
+  ImPlot::PlotShaded("##FPS", &TimeHistory.Data[0], &FPSHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, 0, TimeHistory.Offset, sizeof(double));
+  double MarkerLine = PlotConfigFrametime.MarkerLineWidth;
+  ImPlot::DragLineY(0, &MarkerLine, PlotConfigFrametime.MarkerColor, PlotConfigFrametime.MarkerThickness, DragFlags);
+  ImPlot::PopStyleColor(2);
+  ImPlot::PopStyleVar();
+  ImPlot::EndPlot();
+  RenderPlotStyleEnd();
+}
+
+void FDFX_StatData::RenderPlotStyleBegin(EPlotType Type) {
+  const char* Title = "";
+  FPlotConfig Config;
+  switch (Type) {
+    case EPlotType::Threads:   Title = "Threads";   Config = PlotConfigThreads;   break;
+    case EPlotType::Frametime: Title = "Frametime"; Config = PlotConfigFramerate; break;
+    case EPlotType::Framerate: Title = "Framerate"; Config = PlotConfigFrametime;   break;
+  }
+  ImGui::SetNextWindowBgAlpha(Config.BackgroundColor.w);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
   ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 0.0f);
-  ImGui::PushStyleColor(ImGuiCol_WindowBg, FPSPlotConfig.BackgroundColor);
-  ImGui::Begin("FPS", nullptr, MainWindowFlags);
+  ImGui::PushStyleColor(ImGuiCol_WindowBg, Config.BackgroundColor);
+  ImGui::Begin(Title, nullptr, PlotWindowFlags);
   ImPlot::PushStyleVar(ImPlotStyleVar_PlotBorderSize, 0.0f);
   ImPlot::PushStyleVar(ImPlotStyleVar_PlotPadding, ImVec2(0, 0));
   ImPlot::PushStyleVar(ImPlotStyleVar_PlotMinSize, ImVec2(100, 75));
   ImPlot::PushStyleVar(ImPlotStyleVar_LegendPadding, ImVec2(0, 0));
-  ImPlot::PushStyleColor(ImPlotCol_PlotBg, FPSPlotConfig.PlotBackgroundColor);
-  ImPlot::BeginPlot("FRAME-RATE (FPS)", ImVec2(-1, -1), PlotFlags | ImPlotFlags_NoLegend);
-  ImPlot::SetupAxes("", "", AxisFlags, ImPlotAxisFlags_Opposite | ImPlotAxisFlags_NoLabel);
-  ImPlot::SetupAxisLimits(ImAxis_X1, CurrentTime - FPSPlotConfig.HistoryDuration, CurrentTime, ImGuiCond_Always);
-  ImPlot::SetupAxisLimits(ImAxis_Y1, FPSPlotConfig.Range.x, FPSPlotConfig.Range.y, ImGuiCond_Always);
-  ImPlot::SetupFinish();
-  ImPlot::PushStyleVar(ImPlotStyleVar_FillAlpha, FPSPlotConfig.FillAlpha);
-  ImPlot::PushStyleColor(ImPlotCol_Line, FPSPlotConfig.LineColor);
-  ImPlot::PushStyleColor(ImPlotCol_Fill, FPSPlotConfig.ShadeColor);
-  ImPlot::PlotLine("##FPS", &TimeHistory.Data[0], &FPSHistory.Data[0], TimeHistory.Data.Num(), 0, TimeHistory.Offset, sizeof(double));
-  ImPlot::PlotShaded("##FPS", &TimeHistory.Data[0], &FPSHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, 0, TimeHistory.Offset, sizeof(double));
-  double MarkerLine = FPSPlotConfig.MarkerLineWidth;
-  ImPlot::DragLineY(0, &MarkerLine, FPSPlotConfig.MarkerColor, FPSPlotConfig.MarkerThickness, DragFlags);
-  ImPlot::PopStyleColor(2);
-  ImPlot::PopStyleVar();
-  ImPlot::EndPlot();
+  ImPlot::PushStyleColor(ImPlotCol_PlotBg, Config.PlotBackgroundColor);
+}
+
+void FDFX_StatData::RenderPlotStyleEnd() {
   ImPlot::PopStyleColor();
   ImPlot::PopStyleVar(4);
   ImGui::End();
@@ -1756,7 +1353,8 @@ void FDFX_StatData::RenderInfoHelper(const FString& Info, const T& Value) {
     ImGui::Checkbox(TCHAR_TO_ANSI(*Info), &LocalValue);
   } else {
     bool DummyCheckbox = false;
-    ImGui::Checkbox("", &DummyCheckbox);
+    FString HiddenLabel = FString::Printf(TEXT("##%s"), *Info);
+    ImGui::Checkbox(TCHAR_TO_ANSI(*HiddenLabel), &DummyCheckbox);
     ImGui::SameLine();
 
     FString ValueFormatted;
