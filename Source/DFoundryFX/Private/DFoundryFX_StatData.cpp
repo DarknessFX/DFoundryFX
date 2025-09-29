@@ -465,7 +465,7 @@ void FDFX_StatData::RenderShadersTab() {
           break;
       }
       ImGui::TableNextColumn();
-      ImGui::Text("%s", TCHAR_TO_ANSI(*ShaderLog.Hash.Left(40)));
+      ImGui::Text("%s", StringCast<ANSICHAR>(*ShaderLog.Hash.Left(40)).Get());
       ImGui::TableNextColumn();
       ImGui::Text("%.5f", ShaderLog.Time);
       ImGui::TableNextColumn();
@@ -821,7 +821,7 @@ void FDFX_StatData::RenderDebugTab() {
     for (const FString& Stat : *ViewportClient->GetEnabledStats()) {
       JoinedStr += Stat + TEXT("\n");
     }
-    ImGui::Text(TCHAR_TO_ANSI(*JoinedStr));
+    ImGui::Text("%s", StringCast<ANSICHAR>(*JoinedStr).Get());
     ImGui::Unindent();
   }
   ImGui::Text("Frame Count: %d", FrameCount);
@@ -1332,14 +1332,12 @@ void FDFX_StatData::RenderStats(EDFXStatCategory InCategory, const FString& Filt
         InCategory == EDFXStatCategory::All) {
       const FString FormattedCmd = FString::Printf(TEXT("Stat %s"), *Elem.Command);
       const FString StatId = FString::Printf(TEXT("Stat_%s"), *Elem.Command);
-      const char* StatCmdAnsi = TCHAR_TO_UTF8(*FormattedCmd);
-      const char* StatIdAnsi = TCHAR_TO_UTF8(*StatId);
 
       ImGui::TableNextColumn();
-      ImGui::Text(StatCmdAnsi);
+      ImGui::Text("%s", StringCast<ANSICHAR>(*FormattedCmd).Get());
       LocalToggle = Elem.bEnabled;
       ImGui::TableNextColumn();
-      RenderToggleButton(StatIdAnsi, &LocalToggle);
+      RenderToggleButton(StringCast<ANSICHAR>(*StatId).Get(), &LocalToggle);
       ToggleStat(Elem.Command, LocalToggle);
       Elem.bEnabled = LocalToggle;
     }
@@ -1350,11 +1348,11 @@ template<typename T>
 void FDFX_StatData::RenderInfoHelper(const FString& Info, const T& Value) {
   if constexpr (std::is_same_v<T, bool>) {
     bool LocalValue = Value;
-    ImGui::Checkbox(TCHAR_TO_ANSI(*Info), &LocalValue);
+    ImGui::Checkbox(StringCast<ANSICHAR>(*Info).Get(), &LocalValue);
   } else {
     bool DummyCheckbox = false;
     FString HiddenLabel = FString::Printf(TEXT("##%s"), *Info);
-    ImGui::Checkbox(TCHAR_TO_ANSI(*HiddenLabel), &DummyCheckbox);
+    ImGui::Checkbox(StringCast<ANSICHAR>(*HiddenLabel).Get(), &DummyCheckbox);
     ImGui::SameLine();
 
     FString ValueFormatted;
@@ -1379,6 +1377,6 @@ void FDFX_StatData::RenderInfoHelper(const FString& Info, const T& Value) {
     }
 
     FString DisplayText = FString::Printf(TEXT("%s - %s"), *Info, *ValueFormatted);
-    ImGui::Text(TCHAR_TO_ANSI(*DisplayText));
+    ImGui::Text("%s", StringCast<ANSICHAR>(*DisplayText).Get());
   }
 }

@@ -20,26 +20,26 @@ void FDFX_StatData::RenderEngineTab_Data() {
       ImGui::TableNextColumn();
       ImGui::Text("Physical");
       ImGui::TableNextColumn();
-      ImGui::Text("%s", TCHAR_TO_ANSI(*GetMemoryString(MemoryStats.UsedPhysical)));
+      ImGui::Text("%s", StringCast<ANSICHAR>(*GetMemoryString(MemoryStats.UsedPhysical)).Get());
       ImGui::TableNextColumn();
-      ImGui::Text("%s", TCHAR_TO_ANSI(*GetMemoryString(MemoryStats.PeakUsedPhysical)));
+      ImGui::Text("%s", StringCast<ANSICHAR>(*GetMemoryString(MemoryStats.PeakUsedPhysical)).Get());
       ImGui::TableNextColumn();
-      ImGui::Text("%s", TCHAR_TO_ANSI(*GetMemoryString(MemoryStats.AvailablePhysical)));
+      ImGui::Text("%s", StringCast<ANSICHAR>(*GetMemoryString(MemoryStats.AvailablePhysical)).Get());
       ImGui::TableNextColumn();
-      ImGui::Text("%s", TCHAR_TO_ANSI(*GetMemoryString(MemoryStats.TotalPhysical)));
+      ImGui::Text("%s", StringCast<ANSICHAR>(*GetMemoryString(MemoryStats.TotalPhysical)).Get());
 
       // Virtual Memory
       ImGui::TableNextRow();
       ImGui::TableNextColumn();
       ImGui::Text("Virtual");
       ImGui::TableNextColumn();
-      ImGui::Text("%s", TCHAR_TO_ANSI(*GetMemoryString(MemoryStats.UsedVirtual)));
+      ImGui::Text("%s", StringCast<ANSICHAR>(*GetMemoryString(MemoryStats.UsedVirtual)).Get());
       ImGui::TableNextColumn();
-      ImGui::Text("%s", TCHAR_TO_ANSI(*GetMemoryString(MemoryStats.PeakUsedVirtual)));
+      ImGui::Text("%s", StringCast<ANSICHAR>(*GetMemoryString(MemoryStats.PeakUsedVirtual)).Get());
       ImGui::TableNextColumn();
-      ImGui::Text("%s", TCHAR_TO_ANSI(*GetMemoryString(MemoryStats.AvailableVirtual)));
+      ImGui::Text("%s", StringCast<ANSICHAR>(*GetMemoryString(MemoryStats.AvailableVirtual)).Get());
       ImGui::TableNextColumn();
-      ImGui::Text("%s", TCHAR_TO_ANSI(*GetMemoryString(MemoryStats.TotalVirtual)));
+      ImGui::Text("%s", StringCast<ANSICHAR>(*GetMemoryString(MemoryStats.TotalVirtual)).Get());
 
       ImGui::EndTable();
     }
