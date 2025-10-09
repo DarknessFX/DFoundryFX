@@ -24,6 +24,11 @@ While the plugin is enabled you always have access to the charts, controls and s
 directly in your game viewport, this plugin don't need actors or objects to be created 
 in your project.<br/>
 
+## Usage
+
+. Play in a **New Editor Window (PIE)**.<br/>
+<img src="https://raw.githubusercontent.com/DarknessFX/DFoundryFX/refs/heads/main/.git_img/screenshot02.png" width="640px" /> <br/>
+
 ## Installation
 
 ### Use precompiled plugin (Unreal Engine 5.6 or newer)
