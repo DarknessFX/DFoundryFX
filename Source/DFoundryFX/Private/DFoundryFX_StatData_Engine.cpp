@@ -1,7 +1,11 @@
 #include "DFoundryFX_StatData.h"
 
 void FDFX_StatData::RenderEngineTab_Data() {
-  UWorld* World = ViewportClient->GetWorld();
+  UWorld* World = GetActiveWorld();
+  if (!World) {
+    UE_LOG(LogTemp, Warning, TEXT("No valid world found in current context."));
+    return;
+  }
   IConsoleManager& ConsoleManager = IConsoleManager::Get();
   UGameUserSettings* const GameUserSettings = GEngine->GetGameUserSettings();
 
@@ -593,7 +597,7 @@ void FDFX_StatData::RenderEngineTab_Data() {
     ImGui::EndDisabled();
   }
 
-  static APlayerController* PC = ViewportClient->GetWorld() ? ViewportClient->GetWorld()->GetFirstPlayerController() : nullptr;
+  static APlayerController* PC = World->GetFirstPlayerController();
   if (PC) {
     if (ImGui::CollapsingHeader("Input Context")) {
       ImGui::BeginDisabled();

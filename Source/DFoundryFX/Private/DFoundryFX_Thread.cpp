@@ -58,16 +58,27 @@ bool FDFX_Thread::Init() {
 void FDFX_Thread::OnGameModeInitialized(AGameModeBase* aGameMode) {
   UE_LOG(LogDFoundryFX, Log, TEXT("Thread: Initializing ImGui resources and context."));
 
+    // UE context
+  GameMode = aGameMode;
+  uWorld = GameMode.Get()->GetWorld();
+  GameViewport = uWorld.Get()->GetGameViewport();
+
+#if WITH_EDITOR
+  if (GEditor->GetActiveViewport() == GameViewport->Viewport) {
+    FString ViewportErrorMsg = TEXT("DFoundryFX: Please use Play > New Editor Window (PIE).\n");
+    UE_LOG(LogDFoundryFX, Warning, TEXT("%s"), *ViewportErrorMsg);
+    GEngine->AddOnScreenDebugMessage(-1, 8.f, FColor::Red, ViewportErrorMsg);
+    bStopping = true;
+    return;
+  }
+#endif
+
   // ImGui init
   m_ImGuiContext = ImGui::CreateContext();
   m_ImPlotContext = ImPlot::CreateContext();
   ImGui_ImplUE_CreateDeviceObjects();
   ImGui_ImplUE_Init();
-
-    // UE context
-  GameMode = aGameMode;
-  uWorld = GameMode.Get()->GetWorld();
-  GameViewport = uWorld.Get()->GetGameViewport();
+  bStopping = false;
 
   // Cleanup if PIE or second window.
   RemoveDelegates();
@@ -544,6 +555,10 @@ void FDFX_Thread::RemoveDelegates() {
     GameViewport.Get()->GetWindow().Get()->GetOnWindowClosedEvent().Remove(hOnViewportClose);
     hOnViewportClose.Reset();
   }
+  //if (hOnHUDPostRender.IsValid() && PlayerController.Get()->GetHUD()->OnHUDPostRender.IsBound()) {
+  //  PlayerController.Get()->GetHUD()->OnHUDPostRender.Remove(hOnHUDPostRender);
+  //  hOnHUDPostRender.Reset();
+  //}
   if (hOnHUDPostRender.IsValid() && PlayerController.IsValid()) {
     AHUD* HUD = PlayerController.Get()->GetHUD();
     if (HUD && HUD->OnHUDPostRender.IsBound()) {

@@ -138,10 +138,13 @@ void FDFX_StatData::RenderMainWindow() {
     ImGui::EndTabBar();    
   }
 #if PLATFORM_WINDOWS
-  const APlayerController* PC = ViewportClient->GetWorld()->GetFirstPlayerController();
-  bool bShouldDraw = ImGui::IsWindowHovered() && !PC->bShowMouseCursor;
-  if (bShouldDraw != ImGui::GetIO().MouseDrawCursor) {
-    ImGui::GetIO().MouseDrawCursor = bShouldDraw;
+  UWorld* World = GetActiveWorld();
+  if (World) {
+    const APlayerController* PC = World->GetFirstPlayerController();
+    bool bShouldDraw = ImGui::IsWindowHovered() && !PC->bShowMouseCursor;
+    if (bShouldDraw != ImGui::GetIO().MouseDrawCursor) {
+      ImGui::GetIO().MouseDrawCursor = bShouldDraw;
+    }
   }
 #endif
   ImGui::End();
@@ -188,7 +191,7 @@ void FDFX_StatData::UpdateStats() {
 }
 
 void FDFX_StatData::RenderEngineTab() {
-  UWorld* World = ViewportClient->GetWorld();
+  //UWorld* World = ViewportClient->GetWorld();
   IConsoleManager& ConsoleManager = IConsoleManager::Get();
 
   if (ImGui::CollapsingHeader("Viewport Settings")) {
@@ -1342,4 +1345,20 @@ void FDFX_StatData::RenderStats(EDFXStatCategory InCategory, const FString& Filt
       Elem.bEnabled = LocalToggle;
     }
   }
+}
+
+UWorld* FDFX_StatData::GetActiveWorld() {
+  UWorld* World = nullptr; //ViewportClient->GetWorld()
+  if (GIsEditor) {
+#if WITH_EDITOR
+    if (UWorld* PlayWorld = GEditor->PlayWorld) {
+      World = PlayWorld;
+    } else {
+      World = GEditor->GetEditorWorldContext().World();
+    }
+#endif
+  } else {
+    World = GEngine->GetCurrentPlayWorld(nullptr);
+  }
+  return World;
 }

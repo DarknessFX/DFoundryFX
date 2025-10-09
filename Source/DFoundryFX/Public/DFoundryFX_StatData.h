@@ -233,4 +233,6 @@ private:
     FString Hash;
   };
   static TArray<FShaderCompileLog> ShaderCompileLogs;
+
+  static UWorld* GetActiveWorld();
 };
