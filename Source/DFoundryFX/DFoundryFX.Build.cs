@@ -10,15 +10,15 @@ public class DFoundryFX : ModuleRules
     PublicIncludePaths.AddRange(
 			new string[] {
         Path.Combine(ModuleDirectory, "Public"),
-        Path.Combine(PluginDirectory, "Source/Thirdparty/ImGui"),
-        Path.Combine(PluginDirectory, "Source/Thirdparty/ImGui/imgui"),
-        Path.Combine(PluginDirectory, "Source/Thirdparty/ImGui/implot"),
       }
 		);
 
     PrivateIncludePaths.AddRange(
 			new string[] {
         Path.Combine(ModuleDirectory, "Private"),
+        Path.Combine(PluginDirectory, "Source/Thirdparty/ImGui"),
+        Path.Combine(PluginDirectory, "Source/Thirdparty/ImGui/imgui"),
+        Path.Combine(PluginDirectory, "Source/Thirdparty/ImGui/implot"),
       }
     );
 		
