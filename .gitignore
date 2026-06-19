@@ -70,3 +70,7 @@ Plugins/*/Intermediate/*
 
 # Cache files for the editor to use
 DerivedDataCache/*
+
+Source/Thirdparty/ImGui/*
+!Source/Thirdparty/ImGui/*.*
+Source/Thirdparty/ImGui/*/

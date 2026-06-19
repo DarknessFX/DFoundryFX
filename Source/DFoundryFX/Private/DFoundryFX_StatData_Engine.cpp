@@ -103,7 +103,7 @@ void FDFX_StatData::RenderEngineTab_Data() {
     static bool bIsAllowedFramerateSmoothing = GEngine->IsAllowedFramerateSmoothing();
     static bool bForceDisableFrameRateSmoothing = GEngine->bForceDisableFrameRateSmoothing;
     static bool bSmoothFrameRate = GEngine->bSmoothFrameRate;
-    static float MinDesiredFrameRate = GEngine->MinDesiredFrameRate;
+    //static float MinDesiredFrameRate = GEngine->MinDesiredFrameRate;
     static bool bUseFixedFrameRate = GEngine->bUseFixedFrameRate;
     static float FixedFrameRate = GEngine->FixedFrameRate;
     static bool bCanBlueprintsTickByDefault = GEngine->bCanBlueprintsTickByDefault;
@@ -147,7 +147,7 @@ void FDFX_StatData::RenderEngineTab_Data() {
     RenderInfoHelper(TEXT("IsAllowedFramerateSmoothing"), bIsAllowedFramerateSmoothing);
     RenderInfoHelper(TEXT("bForceDisableFrameRateSmoothing"), bForceDisableFrameRateSmoothing);
     RenderInfoHelper(TEXT("bSmoothFrameRate"), bSmoothFrameRate);
-    RenderInfoHelper(TEXT("MinDesiredFrameRate"), MinDesiredFrameRate);
+    //RenderInfoHelper(TEXT("MinDesiredFrameRate"), MinDesiredFrameRate);
     RenderInfoHelper(TEXT("bUseFixedFrameRate"), bUseFixedFrameRate);
     RenderInfoHelper(TEXT("FixedFrameRate"), FixedFrameRate);
     RenderInfoHelper(TEXT("bCanBlueprintsTickByDefault"), bCanBlueprintsTickByDefault);
@@ -304,7 +304,7 @@ void FDFX_StatData::RenderEngineTab_Data() {
     static const TCHAR* DefaultPathSeparator = FGenericPlatformMisc::GetDefaultPathSeparator();
     static FString DeviceId = FGenericPlatformMisc::GetDeviceId();
     static FString DeviceMakeAndModel = FGenericPlatformMisc::GetDeviceMakeAndModel();
-    static int32 DeviceTemperatureLevel = FGenericPlatformMisc::GetDeviceTemperatureLevel();
+    static int32 DeviceTemperatureLevel = FGenericPlatformMisc::GetDeviceTemperature();
     static float DeviceVolume = FGenericPlatformMisc::GetDeviceVolume();
     static const TCHAR* EngineMode = FGenericPlatformMisc::GetEngineMode();
     static FString EpicAccountId = FGenericPlatformMisc::GetEpicAccountId();
@@ -331,11 +331,11 @@ void FDFX_StatData::RenderEngineTab_Data() {
     static bool bVolumeButtonsHandledBySystem = FGenericPlatformMisc::GetVolumeButtonsHandledBySystem();
     static bool bHasActiveWiFiConnection = FGenericPlatformMisc::HasActiveWiFiConnection();
     static bool bHasMemoryWarningHandler = FGenericPlatformMisc::HasMemoryWarningHandler();
-    static bool bHasNonoptionalCPUFeatures = FGenericPlatformMisc::HasNonoptionalCPUFeatures();
+    static bool bHasNonoptionalCPUFeatures = false; //FGenericPlatformMisc::HasNonoptionalCPUFeatures();
     static bool bHasProjectPersistentDownloadDir = FGenericPlatformMisc::HasProjectPersistentDownloadDir();
     static bool bHasSeparateChannelForDebugOutput = FGenericPlatformMisc::HasSeparateChannelForDebugOutput();
     static bool bHasVariableHardware = FGenericPlatformMisc::HasVariableHardware();
-    static bool bIs64bitOperatingSystem = FGenericPlatformMisc::Is64bitOperatingSystem();
+    static bool bIs64bitOperatingSystem = true; //FGenericPlatformMisc::Is64bitOperatingSystem();
     static bool bIsDebuggerPresent = FGenericPlatformMisc::IsDebuggerPresent();
     static bool bIsEnsureAllowed = FGenericPlatformMisc::IsEnsureAllowed();
     static bool bIsInLowPowerMode = FGenericPlatformMisc::IsInLowPowerMode();
@@ -347,7 +347,7 @@ void FDFX_StatData::RenderEngineTab_Data() {
     static bool bIsRunningInCloud = FGenericPlatformMisc::IsRunningInCloud();
     static bool bIsRunningOnBattery = FGenericPlatformMisc::IsRunningOnBattery();
     static FString LaunchDir = FGenericPlatformMisc::LaunchDir();
-    static bool bNeedsNonoptionalCPUFeaturesCheck = FGenericPlatformMisc::NeedsNonoptionalCPUFeaturesCheck();
+    static bool bNeedsNonoptionalCPUFeaturesCheck = false;  // FGenericPlatformMisc::NeedsNonoptionalCPUFeaturesCheck();
     static int32 NumberOfCores = FGenericPlatformMisc::NumberOfCores();
     static int32 NumberOfCoresIncludingHyperthreads = FGenericPlatformMisc::NumberOfCoresIncludingHyperthreads();
     static int32 NumberOfIOWorkerThreadsToSpawn = FGenericPlatformMisc::NumberOfIOWorkerThreadsToSpawn();

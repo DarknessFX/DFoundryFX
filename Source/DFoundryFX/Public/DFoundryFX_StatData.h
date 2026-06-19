@@ -16,7 +16,7 @@
 #include "HAL/ConsoleManager.h"
 #include "ImGui/imgui.h"
 #include "ImGui/imgui_internal.h"
-#include "ImGui/implot.h"
+#include "ImPlot/implot.h"
 #include "DFoundryFX_StatDataType.h"
 #include "Templates/Function.h"
 
@@ -159,8 +159,7 @@ private:
     | ImGuiWindowFlags_NoResize
     | ImGuiWindowFlags_NoScrollbar
     | ImGuiWindowFlags_NoScrollWithMouse
-    | ImGuiWindowFlags_NoMouseInputs
-    | ImGuiWindowFlags_NoDocking;
+    | ImGuiWindowFlags_NoMouseInputs;
 
   static inline ImPlotFlags PlotFlags = ImPlotFlags_NoMenus
     | ImPlotFlags_NoBoxSelect

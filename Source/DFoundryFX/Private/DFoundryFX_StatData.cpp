@@ -172,7 +172,7 @@ void FDFX_StatData::UpdateStats() {
   GPUFrameTime = 0.9f * GPUFrameTime + 0.1f * FPlatformTime::ToMilliseconds(RHIGetGPUFrameCycles());
   RHIThreadTime = 0.9f * RHIThreadTime + 0.1f * FPlatformTime::ToMilliseconds(GRHIThreadTime); //  GWorkingRHIThreadTime, GRHIThreadTime display some crazy values on Shipping builds, changed to GWorkingRHIThreadTime.
   SwapBufferTime = 0.9f * SwapBufferTime + 0.1f * FPlatformTime::ToMilliseconds(GSwapBufferTime);
-  InputLatencyTime = 0.9f * InputLatencyTime + 0.1f * FPlatformTime::ToMilliseconds(GInputLatencyTimer.DeltaTime);
+  //InputLatencyTime = 0.9f * InputLatencyTime + 0.1f * FPlatformTime::ToMilliseconds(GInputLatencyTimer.DeltaTime);
 
   // Save data for ImPlot
   TimeHistory.Add(CurrentTime);
@@ -955,7 +955,8 @@ void FDFX_StatData::RenderPlotThreads() {
   ImPlot::SetupAxisLimits(ImAxis_X1, CurrentTime - PlotConfigThreads.HistoryDuration, CurrentTime, ImGuiCond_Always);
   ImPlot::SetupAxisLimits(ImAxis_Y1, PlotConfigThreads.Range.x, PlotConfigThreads.Range.y, ImGuiCond_Always);
   ImPlot::SetupFinish();
-  ImPlot::PushStyleVar(ImPlotStyleVar_FillAlpha, PlotConfigThreads.FillAlpha);
+  ImPlotSpec ThreadPlotSpec;
+  ThreadPlotSpec.FillAlpha = PlotConfigThreads.FillAlpha;
 
   TArray<bool> ThreadDrawOrder;
   TArray<float> ThreadPlotOrder;
@@ -984,11 +985,18 @@ void FDFX_StatData::RenderPlotThreads() {
   for (int32 i = 6; i >= 0; --i) {
     if (ThreadPlotOrder[i] == GameThreadTime && !ThreadDrawOrder[0]) {
       if (ThreadPlotStyles[0].bShowFramePlot) {
-        ImPlot::PushStyleColor(ImPlotCol_Line, ThreadPlotStyles[0].LineColor);
-        ImPlot::PushStyleColor(ImPlotCol_Fill, ThreadPlotStyles[0].ShadeColor);
-        ImPlot::PlotLine("Game", &TimeHistory.Data[0], &GameThreadTimeHistory.Data[0], TimeHistory.Data.Num(), LineFlags, TimeHistory.Offset, sizeof(double));
-        ImPlot::PlotShaded("Game", &TimeHistory.Data[0], &GameThreadTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, ShadeFlags, TimeHistory.Offset, sizeof(double));
-        ImPlot::PopStyleColor(2);
+        ImPlotSpec Spec;
+        Spec.LineColor = ThreadPlotStyles[0].LineColor;
+        Spec.FillColor = ThreadPlotStyles[0].ShadeColor;
+        Spec.Offset = TimeHistory.Offset;
+        Spec.Stride = (int)sizeof(double);
+        Spec.FillAlpha = PlotConfigThreads.FillAlpha;
+
+        Spec.Flags = LineFlags;
+        ImPlot::PlotLine("Game", &TimeHistory.Data[0], &GameThreadTimeHistory.Data[0], TimeHistory.Data.Num(), Spec);
+
+        Spec.Flags = ShadeFlags;
+        ImPlot::PlotShaded("Game", &TimeHistory.Data[0], &GameThreadTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, Spec);
       }
       ThreadDrawOrder[0] = true;
       continue;
@@ -996,11 +1004,18 @@ void FDFX_StatData::RenderPlotThreads() {
 
     if (ThreadPlotOrder[i] == RenderThreadTime && !ThreadDrawOrder[1]) {
       if (ThreadPlotStyles[1].bShowFramePlot) {
-        ImPlot::PushStyleColor(ImPlotCol_Line, ThreadPlotStyles[1].LineColor);
-        ImPlot::PushStyleColor(ImPlotCol_Fill, ThreadPlotStyles[1].ShadeColor);
-        ImPlot::PlotLine("Render", &TimeHistory.Data[0], &RenderThreadTimeHistory.Data[0], TimeHistory.Data.Num(), LineFlags, TimeHistory.Offset, sizeof(double));
-        ImPlot::PlotShaded("Render", &TimeHistory.Data[0], &RenderThreadTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, ShadeFlags, TimeHistory.Offset, sizeof(double));
-        ImPlot::PopStyleColor(2);
+        ImPlotSpec Spec;
+        Spec.LineColor = ThreadPlotStyles[1].LineColor;
+        Spec.FillColor = ThreadPlotStyles[1].ShadeColor;
+        Spec.Offset = TimeHistory.Offset;
+        Spec.Stride = (int)sizeof(double);
+        Spec.FillAlpha = PlotConfigThreads.FillAlpha;
+
+        Spec.Flags = LineFlags;
+        ImPlot::PlotLine("Render", &TimeHistory.Data[0], &RenderThreadTimeHistory.Data[0], TimeHistory.Data.Num(), Spec);
+
+        Spec.Flags = ShadeFlags;
+        ImPlot::PlotShaded("Render", &TimeHistory.Data[0], &RenderThreadTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, Spec);
       }
       ThreadDrawOrder[1] = true;
       continue;
@@ -1008,11 +1023,18 @@ void FDFX_StatData::RenderPlotThreads() {
 
     if (ThreadPlotOrder[i] == GPUFrameTime && !ThreadDrawOrder[2]) {
       if (ThreadPlotStyles[2].bShowFramePlot) {
-        ImPlot::PushStyleColor(ImPlotCol_Line, ThreadPlotStyles[2].LineColor);
-        ImPlot::PushStyleColor(ImPlotCol_Fill, ThreadPlotStyles[2].ShadeColor);
-        ImPlot::PlotLine("GPU", &TimeHistory.Data[0], &GPUFrameTimeHistory.Data[0], TimeHistory.Data.Num(), LineFlags, TimeHistory.Offset, sizeof(double));
-        ImPlot::PlotShaded("GPU", &TimeHistory.Data[0], &GPUFrameTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, ShadeFlags, TimeHistory.Offset, sizeof(double));
-        ImPlot::PopStyleColor(2);
+        ImPlotSpec Spec;
+        Spec.LineColor = ThreadPlotStyles[2].LineColor;
+        Spec.FillColor = ThreadPlotStyles[2].ShadeColor;
+        Spec.Offset = TimeHistory.Offset;
+        Spec.Stride = (int)sizeof(double);
+        Spec.FillAlpha = PlotConfigThreads.FillAlpha;
+
+        Spec.Flags = LineFlags;
+        ImPlot::PlotLine("GPU", &TimeHistory.Data[0], &GPUFrameTimeHistory.Data[0], TimeHistory.Data.Num(), Spec);
+
+        Spec.Flags = ShadeFlags;
+        ImPlot::PlotShaded("GPU", &TimeHistory.Data[0], &GPUFrameTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, Spec);
       }
       ThreadDrawOrder[2] = true;
       continue;
@@ -1020,11 +1042,18 @@ void FDFX_StatData::RenderPlotThreads() {
 
     if (ThreadPlotOrder[i] == RHIThreadTime && !ThreadDrawOrder[3]) {
       if (ThreadPlotStyles[3].bShowFramePlot) {
-        ImPlot::PushStyleColor(ImPlotCol_Line, ThreadPlotStyles[3].LineColor);
-        ImPlot::PushStyleColor(ImPlotCol_Fill, ThreadPlotStyles[3].ShadeColor);
-        ImPlot::PlotLine("RHI", &TimeHistory.Data[0], &RHIThreadTimeHistory.Data[0], TimeHistory.Data.Num(), LineFlags, TimeHistory.Offset, sizeof(double));
-        ImPlot::PlotShaded("RHI", &TimeHistory.Data[0], &RHIThreadTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, ShadeFlags, TimeHistory.Offset, sizeof(double));
-        ImPlot::PopStyleColor(2);
+        ImPlotSpec Spec;
+        Spec.LineColor = ThreadPlotStyles[3].LineColor;
+        Spec.FillColor = ThreadPlotStyles[3].ShadeColor;
+        Spec.Offset = TimeHistory.Offset;
+        Spec.Stride = (int)sizeof(double);
+        Spec.FillAlpha = PlotConfigThreads.FillAlpha;
+
+        Spec.Flags = LineFlags;
+        ImPlot::PlotLine("RHI", &TimeHistory.Data[0], &RHIThreadTimeHistory.Data[0], TimeHistory.Data.Num(), Spec);
+
+        Spec.Flags = ShadeFlags;
+        ImPlot::PlotShaded("RHI", &TimeHistory.Data[0], &RHIThreadTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, Spec);
       }
       ThreadDrawOrder[3] = true;
       continue;
@@ -1032,11 +1061,18 @@ void FDFX_StatData::RenderPlotThreads() {
 
     if (ThreadPlotOrder[i] == SwapBufferTime && !ThreadDrawOrder[4]) {
       if (ThreadPlotStyles[4].bShowFramePlot) {
-        ImPlot::PushStyleColor(ImPlotCol_Line, ThreadPlotStyles[4].LineColor);
-        ImPlot::PushStyleColor(ImPlotCol_Fill, ThreadPlotStyles[4].ShadeColor);
-        ImPlot::PlotLine("Swap", &TimeHistory.Data[0], &SwapBufferTimeHistory.Data[0], TimeHistory.Data.Num(), LineFlags, TimeHistory.Offset, sizeof(double));
-        ImPlot::PlotShaded("Swap", &TimeHistory.Data[0], &SwapBufferTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, ShadeFlags, TimeHistory.Offset, sizeof(double));
-        ImPlot::PopStyleColor(2);
+        ImPlotSpec Spec;
+        Spec.LineColor = ThreadPlotStyles[4].LineColor;
+        Spec.FillColor = ThreadPlotStyles[4].ShadeColor;
+        Spec.Offset = TimeHistory.Offset;
+        Spec.Stride = (int)sizeof(double);
+        Spec.FillAlpha = PlotConfigThreads.FillAlpha;
+
+        Spec.Flags = LineFlags;
+        ImPlot::PlotLine("Swap", &TimeHistory.Data[0], &SwapBufferTimeHistory.Data[0], TimeHistory.Data.Num(), Spec);
+
+        Spec.Flags = ShadeFlags;
+        ImPlot::PlotShaded("Swap", &TimeHistory.Data[0], &SwapBufferTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, Spec);
       }
       ThreadDrawOrder[4] = true;
       continue;
@@ -1044,11 +1080,18 @@ void FDFX_StatData::RenderPlotThreads() {
 
     if (ThreadPlotOrder[i] == InputLatencyTime && !ThreadDrawOrder[5]) {
       if (ThreadPlotStyles[5].bShowFramePlot) {
-        ImPlot::PushStyleColor(ImPlotCol_Line, ThreadPlotStyles[5].LineColor);
-        ImPlot::PushStyleColor(ImPlotCol_Fill, ThreadPlotStyles[5].ShadeColor);
-        ImPlot::PlotLine("Input", &TimeHistory.Data[0], &InputLatencyTimeHistory.Data[0], TimeHistory.Data.Num(), LineFlags, TimeHistory.Offset, sizeof(double));
-        ImPlot::PlotShaded("Input", &TimeHistory.Data[0], &InputLatencyTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, ShadeFlags, TimeHistory.Offset, sizeof(double));
-        ImPlot::PopStyleColor(2);
+        ImPlotSpec Spec;
+        Spec.LineColor = ThreadPlotStyles[5].LineColor;
+        Spec.FillColor = ThreadPlotStyles[5].ShadeColor;
+        Spec.Offset = TimeHistory.Offset;
+        Spec.Stride = (int)sizeof(double);
+        Spec.FillAlpha = PlotConfigThreads.FillAlpha;
+
+        Spec.Flags = LineFlags;
+        ImPlot::PlotLine("Input", &TimeHistory.Data[0], &InputLatencyTimeHistory.Data[0], TimeHistory.Data.Num(), Spec);
+
+        Spec.Flags = ShadeFlags;
+        ImPlot::PlotShaded("Input", &TimeHistory.Data[0], &InputLatencyTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, Spec);
       }
       ThreadDrawOrder[5] = true;
       continue;
@@ -1056,20 +1099,25 @@ void FDFX_StatData::RenderPlotThreads() {
 
     if (ThreadPlotOrder[i] == ImGuiThreadTime && !ThreadDrawOrder[6]) {
       if (ThreadPlotStyles[6].bShowFramePlot) {
-        ImPlot::PushStyleColor(ImPlotCol_Line, ThreadPlotStyles[6].LineColor);
-        ImPlot::PushStyleColor(ImPlotCol_Fill, ThreadPlotStyles[6].ShadeColor);
-        ImPlot::PlotLine("ImGui", &TimeHistory.Data[0], &ImGuiThreadTimeHistory.Data[0], TimeHistory.Data.Num(), LineFlags, TimeHistory.Offset, sizeof(double));
-        ImPlot::PlotShaded("ImGui", &TimeHistory.Data[0], &ImGuiThreadTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, ShadeFlags, TimeHistory.Offset, sizeof(double));
-        ImPlot::PopStyleColor(2);
+        ImPlotSpec Spec;
+        Spec.LineColor = ThreadPlotStyles[6].LineColor;
+        Spec.FillColor = ThreadPlotStyles[6].ShadeColor;
+        Spec.Offset = TimeHistory.Offset;
+        Spec.Stride = (int)sizeof(double);
+        Spec.FillAlpha = PlotConfigThreads.FillAlpha;
+
+        Spec.Flags = LineFlags;
+        ImPlot::PlotLine("ImGui", &TimeHistory.Data[0], &ImGuiThreadTimeHistory.Data[0], TimeHistory.Data.Num(), Spec);
+
+        Spec.Flags = ShadeFlags;
+        ImPlot::PlotShaded("ImGui", &TimeHistory.Data[0], &ImGuiThreadTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, Spec);
       }
       ThreadDrawOrder[6] = true;
       continue;
     }
   }
-
   double MarkerLine = PlotConfigThreads.MarkerLineWidth;
   ImPlot::DragLineY(0, &MarkerLine, PlotConfigThreads.MarkerColor, PlotConfigThreads.MarkerThickness, DragFlags);
-  ImPlot::PopStyleVar();
 
   ImPlot::EndPlot();
   RenderPlotStyleEnd();
@@ -1081,7 +1129,7 @@ void FDFX_StatData::RenderPlotThreads() {
   ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
   ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(0, 0));
   ImGui::PushStyleVar(ImGuiStyleVar_IndentSpacing, 0.0f);
-  ImGui::Begin("##ThreadsLegendWin", nullptr, ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_NoNav |
+  ImGui::Begin("##ThreadsLegendWin", nullptr, ImGuiWindowFlags_NoNav |
     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
     ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoFocusOnAppearing |
     ImGuiWindowFlags_NoBringToFrontOnFocus );
@@ -1169,15 +1217,19 @@ void FDFX_StatData::RenderPlotFrametime() {
   ImPlot::SetupAxisLimits(ImAxis_X1, CurrentTime - PlotConfigFramerate.HistoryDuration, CurrentTime, ImGuiCond_Always);
   ImPlot::SetupAxisLimits(ImAxis_Y1, PlotConfigFramerate.Range.x, PlotConfigFramerate.Range.y, ImGuiCond_Always);
   ImPlot::SetupFinish();
-  ImPlot::PushStyleVar(ImPlotStyleVar_FillAlpha, PlotConfigFramerate.FillAlpha);
-  ImPlot::PushStyleColor(ImPlotCol_Line, PlotConfigFramerate.LineColor);
-  ImPlot::PushStyleColor(ImPlotCol_Fill, PlotConfigFramerate.ShadeColor);
-  ImPlot::PlotLine("##Frame", &TimeHistory.Data[0], &FrameTimeHistory.Data[0], TimeHistory.Data.Num(), 0, TimeHistory.Offset, sizeof(double));
-  ImPlot::PlotShaded("##Frame", &TimeHistory.Data[0], &FrameTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, 0, TimeHistory.Offset, sizeof(double));
+  ImPlotSpec FramerateSpec = {
+    ImPlotProp_FillAlpha, PlotConfigFramerate.FillAlpha,
+    ImPlotProp_LineColor, PlotConfigFramerate.LineColor,
+    ImPlotProp_FillColor, PlotConfigFramerate.ShadeColor,
+    ImPlotProp_Offset,    TimeHistory.Offset,
+    ImPlotProp_Stride,    (int)sizeof(double),
+    ImPlotProp_Flags,     0
+  };
+
+  ImPlot::PlotLine("##Frame", &TimeHistory.Data[0], &FrameTimeHistory.Data[0], TimeHistory.Data.Num(), FramerateSpec);
+  ImPlot::PlotShaded("##Frame", &TimeHistory.Data[0], &FrameTimeHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, FramerateSpec);
   double MarkerLine = PlotConfigFramerate.MarkerLineWidth;
   ImPlot::DragLineY(0, &MarkerLine, PlotConfigFramerate.MarkerColor, PlotConfigFramerate.MarkerThickness, DragFlags);
-  ImPlot::PopStyleColor(2);
-  ImPlot::PopStyleVar();
   ImPlot::EndPlot();
   RenderPlotStyleEnd();
 }
@@ -1185,7 +1237,6 @@ void FDFX_StatData::RenderPlotFrametime() {
 void FDFX_StatData::RenderPlotFramerate() {  //FPS
   ImGui::SetNextWindowPos(PlotConfigFrametime.Position);
   if (bMainWindowExpanded) {
-
     ImGui::SetNextWindowSize(ImVec2(ViewportSize.X - ViewportSize.X / 4, ViewportSize.Y / 3));
   } else {
     ImGui::SetNextWindowSize(PlotConfigFrametime.Size);
@@ -1196,15 +1247,18 @@ void FDFX_StatData::RenderPlotFramerate() {  //FPS
   ImPlot::SetupAxisLimits(ImAxis_X1, CurrentTime - PlotConfigFrametime.HistoryDuration, CurrentTime, ImGuiCond_Always);
   ImPlot::SetupAxisLimits(ImAxis_Y1, PlotConfigFrametime.Range.x, PlotConfigFrametime.Range.y, ImGuiCond_Always);
   ImPlot::SetupFinish();
-  ImPlot::PushStyleVar(ImPlotStyleVar_FillAlpha, PlotConfigFrametime.FillAlpha);
-  ImPlot::PushStyleColor(ImPlotCol_Line, PlotConfigFrametime.LineColor);
-  ImPlot::PushStyleColor(ImPlotCol_Fill, PlotConfigFrametime.ShadeColor);
-  ImPlot::PlotLine("##FPS", &TimeHistory.Data[0], &FPSHistory.Data[0], TimeHistory.Data.Num(), 0, TimeHistory.Offset, sizeof(double));
-  ImPlot::PlotShaded("##FPS", &TimeHistory.Data[0], &FPSHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, 0, TimeHistory.Offset, sizeof(double));
+  ImPlotSpec FpsSpec = {
+    ImPlotProp_FillAlpha, PlotConfigFrametime.FillAlpha,
+    ImPlotProp_LineColor, PlotConfigFrametime.LineColor,
+    ImPlotProp_FillColor, PlotConfigFrametime.ShadeColor,
+    ImPlotProp_Offset,    TimeHistory.Offset,
+    ImPlotProp_Stride,    (int)sizeof(double),
+    ImPlotProp_Flags,     0
+  };
+  ImPlot::PlotLine("##FPS", &TimeHistory.Data[0], &FPSHistory.Data[0], TimeHistory.Data.Num(), FpsSpec);
+  ImPlot::PlotShaded("##FPS", &TimeHistory.Data[0], &FPSHistory.Data[0], TimeHistory.Data.Num(), -INFINITY, FpsSpec);
   double MarkerLine = PlotConfigFrametime.MarkerLineWidth;
   ImPlot::DragLineY(0, &MarkerLine, PlotConfigFrametime.MarkerColor, PlotConfigFrametime.MarkerThickness, DragFlags);
-  ImPlot::PopStyleColor(2);
-  ImPlot::PopStyleVar();
   ImPlot::EndPlot();
   RenderPlotStyleEnd();
 }

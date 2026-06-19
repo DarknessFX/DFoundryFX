@@ -199,8 +199,7 @@ ImGuiIO& FDFX_Thread::GetImGuiIO() const {
 
 bool FDFX_Thread::ImGui_ImplUE_Init() {
   ImGuiIO& io = GetImGuiIO();
-  io.ConfigFlags |= ImGuiConfigFlags_DockingEnable
-    | ImGuiConfigFlags_NavEnableKeyboard
+  io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard
     | ImGuiConfigFlags_NavEnableGamepad;
   io.BackendFlags |= ImGuiBackendFlags_RendererHasVtxOffset;
 
