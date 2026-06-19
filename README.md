@@ -12,7 +12,7 @@
 
            DarknessFX @ https://dfx.lv | Twitter: @DrkFX
 
-# DFoundryFX plugin For Unreal Engine 5.6
+# DFoundryFX plugin For Unreal Engine 5.8
 
 <img src="https://github.com/DarknessFX/DFoundryFX/raw/eea015c01c242c5107f6b47a4e32e807e9e6de8d/.git_img/screenshot01.png" width="640px" /> <br/>
 
@@ -31,7 +31,7 @@ in your project.<br/>
 
 ## Installation
 
-### Use precompiled plugin (Unreal Engine 5.6 or newer)
+### Use precompiled plugin (Unreal Engine 5.8 or newer)
 
 . Download the latest <a href="https://github.com/DarknessFX/DFoundryFX/releases" target="_blank">release</a>. <br/>
 . Unzip the file in your UEFolder\Engine\Plugins. <br/>
